@@ -20,3 +20,7 @@ WinMirrorClicker/config.txt
 # OS junk
 .DS_Store
 Thumbs.db
+
+# Dist
+dist/
+*.zip
