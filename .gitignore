@@ -1,0 +1,22 @@
+# Visual Studio / .NET
+.vs/
+bin/
+obj/
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+
+# Build outputs
+WinMirrorClicker/bin/
+WinMirrorClicker/obj/
+
+# Logs
+*.log
+
+# Runtime files
+WinMirrorClicker/config.txt
+
+# OS junk
+.DS_Store
+Thumbs.db
