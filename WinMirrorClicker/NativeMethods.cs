@@ -12,12 +12,16 @@ internal static class NativeMethods
 
     internal const int WM_KEYDOWN = 0x0100;
     internal const int WM_SYSKEYDOWN = 0x0104;
+    internal const int WM_KEYUP = 0x0101;
+    internal const int WM_SYSKEYUP = 0x0105;
     internal const int WM_HOTKEY = 0x0312;
+    internal const int WM_MOUSEMOVE = 0x0200;
 
     internal const int VK_F9 = 0x78;
     internal const int VK_F10 = 0x79;
     internal const int VK_F11 = 0x7A;
     internal const int VK_F12 = 0x7B;
+    internal const int VK_E = 0x45;
     internal const int VK_Z = 0x5A;
 
     internal const uint MOD_NOREPEAT = 0x4000;
@@ -38,8 +42,12 @@ internal static class NativeMethods
     internal const uint MOUSEEVENTF_LEFTUP = 0x0004;
     internal const uint MOUSEEVENTF_VIRTUALDESK = 0x4000;
     internal const uint MOUSEEVENTF_ABSOLUTE = 0x8000;
+    internal const uint KEYEVENTF_EXTENDEDKEY = 0x0001;
+    internal const uint KEYEVENTF_KEYUP = 0x0002;
+    internal const uint KEYEVENTF_SCANCODE = 0x0008;
 
     internal delegate IntPtr HookProc(int nCode, IntPtr wParam, IntPtr lParam);
+    internal delegate bool EnumWindowsProc(IntPtr hWnd, IntPtr lParam);
 
     [StructLayout(LayoutKind.Sequential)]
     internal struct POINT
@@ -80,6 +88,8 @@ internal static class NativeMethods
     {
         [FieldOffset(0)]
         public MOUSEINPUT mi;
+        [FieldOffset(0)]
+        public KEYBDINPUT ki;
     }
 
     [StructLayout(LayoutKind.Sequential)]
@@ -88,6 +98,16 @@ internal static class NativeMethods
         public int dx;
         public int dy;
         public uint mouseData;
+        public uint dwFlags;
+        public uint time;
+        public IntPtr dwExtraInfo;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    internal struct KEYBDINPUT
+    {
+        public ushort wVk;
+        public ushort wScan;
         public uint dwFlags;
         public uint time;
         public IntPtr dwExtraInfo;
@@ -119,6 +139,15 @@ internal static class NativeMethods
 
     [DllImport("user32.dll", CharSet = CharSet.Unicode)]
     internal static extern int GetWindowText(IntPtr hWnd, char[] lpString, int nMaxCount);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    internal static extern int GetWindowTextLength(IntPtr hWnd);
+
+    [DllImport("user32.dll")]
+    internal static extern bool EnumWindows(EnumWindowsProc lpEnumFunc, IntPtr lParam);
+
+    [DllImport("user32.dll")]
+    internal static extern bool IsWindowVisible(IntPtr hWnd);
 
     [DllImport("user32.dll")]
     internal static extern bool IsWindow(IntPtr hWnd);

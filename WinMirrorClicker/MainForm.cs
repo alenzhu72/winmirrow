@@ -15,6 +15,8 @@ internal sealed class MainForm : Form
     private readonly Label _modeLabel = new() { AutoSize = true };
     private readonly Label _pipeLabel = new() { AutoSize = true };
     private readonly Label _followLabel = new() { AutoSize = true };
+    private readonly Button _toggleFollowButton = new() { AutoSize = true, Text = "切换跟随" };
+    private readonly Button _launchTargetAgentButton = new() { AutoSize = true, Text = "启动目标代理(--target)" };
     private readonly Button _spawnTargetAgentButton = new() { AutoSize = true, Text = "从窗口2进程启动目标代理" };
     private readonly Panel _sourceStatus = new() { Width = 16, Height = 16, BackColor = Color.DarkRed, Margin = new Padding(0, 2, 8, 2) };
     private readonly Panel _targetStatus = new() { Width = 16, Height = 16, BackColor = Color.DarkRed, Margin = new Padding(0, 2, 8, 2) };
@@ -34,11 +36,13 @@ internal sealed class MainForm : Form
     private Point? _lastSourceClientPoint;
     private Point? _lastTargetClientPoint;
     private bool _followEnabled = true;
+    private bool _forcedMovePressed;
 
     private const int HotkeyIdBindSource = 1;
     private const int HotkeyIdBindTarget = 2;
     private const int HotkeyIdSwap = 3;
     private const int HotkeyIdStopFollow = 4;
+    private const int HotkeyIdMasterToggle = 5;
 
     internal MainForm(bool runAsTargetAgent, IntPtr? initialTargetHwnd)
     {
@@ -89,6 +93,8 @@ internal sealed class MainForm : Form
         FormClosing += (_, _) => Shutdown();
 
         _spawnTargetAgentButton.Click += (_, _) => SpawnTargetAgentFromTargetWindow();
+        _toggleFollowButton.Click += (_, _) => ToggleFollow();
+        _launchTargetAgentButton.Click += (_, _) => LaunchTargetAgentInCurrentSession();
     }
 
     private static Control BuildBindRow(string caption, Control status, Control value)
@@ -109,11 +115,13 @@ internal sealed class MainForm : Form
         row.Controls.Add(new Label { Text = "   ", AutoSize = true });
         row.Controls.Add(_pipeLabel);
         row.Controls.Add(new Label { Text = "   ", AutoSize = true });
-        _followLabel.Text = "跟随: 开(Ctrl+Shift+Z停止)";
+        _followLabel.Text = "跟随: 开(Ctrl+Shift+E开/关, Ctrl+Shift+Z停止)";
         row.Controls.Add(_followLabel);
+        row.Controls.Add(_toggleFollowButton);
         if (!_runAsTargetAgent)
         {
             row.Controls.Add(new Label { Text = "   ", AutoSize = true });
+            row.Controls.Add(_launchTargetAgentButton);
             row.Controls.Add(_spawnTargetAgentButton);
         }
         return row;
@@ -127,7 +135,9 @@ internal sealed class MainForm : Form
             UpdateDelayLabel();
 
             _hook.KeyDown += OnGlobalKeyDownFallback;
+            _hook.KeyUp += OnGlobalKeyUpFallback;
             _hook.MouseLeftDown += OnGlobalMouseLeftDown;
+            _hook.MouseMove += OnGlobalMouseMove;
             _hook.Start();
 
             AppendLog("全局钩子已启用。");
@@ -176,6 +186,19 @@ internal sealed class MainForm : Form
 
     private void OnGlobalKeyDownFallback(int vkCode)
     {
+        if (Config.ForcedMoveEnabled && vkCode == Config.ForcedMoveVk)
+        {
+            _forcedMovePressed = true;
+            AppendLog("源端强制移动键已按下。");
+            var target = _targetHwnd;
+            var source = _sourceHwnd;
+            if (target != IntPtr.Zero && source != IntPtr.Zero)
+            {
+                _ = MirrorService.SendForcedKeyAsync(target, Config.ForcedMoveVk, true, source, _cts.Token);
+            }
+            return;
+        }
+
         if (vkCode != NativeMethods.VK_F9 && vkCode != NativeMethods.VK_F10) return;
         if (!IsHandleCreated) return;
         if (_runAsTargetAgent && vkCode == NativeMethods.VK_F9) return;
@@ -195,6 +218,22 @@ internal sealed class MainForm : Form
             if (vkCode == NativeMethods.VK_F9) BindSource(hwnd);
             else BindTarget(hwnd);
         }));
+    }
+
+    private void OnGlobalKeyUpFallback(int vkCode)
+    {
+        if (!IsHandleCreated) return;
+        if (Config.ForcedMoveEnabled && vkCode == Config.ForcedMoveVk)
+        {
+            _forcedMovePressed = false;
+            AppendLog("源端强制移动键已抬起。");
+            var target = _targetHwnd;
+            var source = _sourceHwnd;
+            if (target != IntPtr.Zero && source != IntPtr.Zero)
+            {
+                _ = MirrorService.SendForcedKeyAsync(target, Config.ForcedMoveVk, false, source, _cts.Token);
+            }
+        }
     }
 
     private void OnGlobalMouseLeftDown(int x, int y)
@@ -249,6 +288,33 @@ internal sealed class MainForm : Form
         _ = _mirror.MirrorClientLeftClickAsync(target, clientPoint.X, clientPoint.Y, delayMs, _cts.Token, sourceClientW: srcW, sourceClientH: srcH);
     }
 
+    private void OnGlobalMouseMove(int x, int y)
+    {
+        if (_runAsTargetAgent) return;
+        if (!_followEnabled) return;
+        if (Config.ForcedMoveEnabled)
+        {
+            if (_forcedMovePressed == false && KeyboardForcedMoveIsPressed())
+            {
+                _forcedMovePressed = true;
+                AppendLog("源端强制移动键已按下。");
+            }
+
+            if (_forcedMovePressed)
+            {
+                var source = _sourceHwnd;
+                var target = _targetHwnd;
+                if (source == IntPtr.Zero || target == IntPtr.Zero) return;
+                _ = _mirror.MirrorForcedMoveAsync(source, target, new Point(x, y), _cts.Token);
+            }
+        }
+    }
+
+    private bool KeyboardForcedMoveIsPressed()
+    {
+        return false;
+    }
+
     private void OnIpcCommand(MirrorClickCommand cmd)
     {
         var target = _targetHwnd;
@@ -301,7 +367,7 @@ internal sealed class MainForm : Form
     private void UpdateDelayLabel()
     {
         Config.LoadIfChanged();
-        _delayLabel.Text = $"{Config.ClickDelayMs} ms  {Config.SendMethod}  {Config.Scale}  RestoreCursor={Config.RestoreCursor}  LogCoords={Config.LogCoords} (config.txt)";
+        _delayLabel.Text = $"{Config.ClickDelayMs} ms  {Config.SendMethod}  {Config.Scale}  Burst={Config.BurstCount}x/{Config.BurstIntervalMs}ms  RestoreCursor={Config.RestoreCursor}  LogCoords={Config.LogCoords} (config.txt)";
     }
 
     private static Point ApplyScalingLocal(Point srcClientPoint, int srcW, int srcH, IntPtr targetHwnd)
@@ -380,6 +446,10 @@ internal sealed class MainForm : Form
             {
                 StopFollow();
             }
+            else if (id == HotkeyIdMasterToggle)
+            {
+                ToggleFollow();
+            }
         }
 
         base.WndProc(ref m);
@@ -394,9 +464,10 @@ internal sealed class MainForm : Form
         var okSource = _runAsTargetAgent || NativeMethods.RegisterHotKey(Handle, HotkeyIdBindSource, NativeMethods.MOD_NOREPEAT, NativeMethods.VK_F9);
         var okSwap = NativeMethods.RegisterHotKey(Handle, HotkeyIdSwap, NativeMethods.MOD_NOREPEAT, NativeMethods.VK_F11);
         var okStop = NativeMethods.RegisterHotKey(Handle, HotkeyIdStopFollow, NativeMethods.MOD_CONTROL | NativeMethods.MOD_SHIFT | NativeMethods.MOD_NOREPEAT, NativeMethods.VK_Z);
+        var okMaster = NativeMethods.RegisterHotKey(Handle, HotkeyIdMasterToggle, NativeMethods.MOD_CONTROL | NativeMethods.MOD_SHIFT | NativeMethods.MOD_NOREPEAT, (uint)Config.ForcedMoveVk);
 
-        _hotkeysRegistered = okTarget && okSource && okSwap && okStop;
-        AppendLog(_hotkeysRegistered ? "已注册全局热键(F9/F10/F11 + Ctrl+Shift+Z)。" : "注册全局热键失败（可能被其他程序占用）。");
+        _hotkeysRegistered = okTarget && okSource && okSwap && okStop && okMaster;
+        AppendLog(_hotkeysRegistered ? "已注册全局热键(F9/F10/F11 + Ctrl+Shift+E开/关 + Ctrl+Shift+Z停止)。" : "注册全局热键失败（可能被其他程序占用）。");
     }
 
     private void UnregisterHotkeys()
@@ -408,6 +479,7 @@ internal sealed class MainForm : Form
         NativeMethods.UnregisterHotKey(Handle, HotkeyIdBindSource);
         NativeMethods.UnregisterHotKey(Handle, HotkeyIdSwap);
         NativeMethods.UnregisterHotKey(Handle, HotkeyIdStopFollow);
+        NativeMethods.UnregisterHotKey(Handle, HotkeyIdMasterToggle);
         _hotkeysRegistered = false;
     }
 
@@ -482,7 +554,17 @@ internal sealed class MainForm : Form
         var hwnd = _targetHwnd;
         if (hwnd == IntPtr.Zero)
         {
-            AppendLog("请先用 F10 绑定窗口2，再启动目标代理。");
+            var auto = TryFindDiabloWindow();
+            if (auto != IntPtr.Zero)
+            {
+                BindTarget(auto);
+                hwnd = _targetHwnd;
+            }
+        }
+
+        if (hwnd == IntPtr.Zero)
+        {
+            AppendLog("未绑定窗口2，且无法自动找到目标窗口。若目标窗口在另一个会话(Session)内，需要在那个会话运行 --target。");
             return;
         }
 
@@ -492,6 +574,69 @@ internal sealed class MainForm : Form
         {
             AppendLog("提示：如果窗口2属于另一个用户且权限更高，通常需要以管理员身份运行本工具才能启动目标代理。");
         }
+    }
+
+    private void LaunchTargetAgentInCurrentSession()
+    {
+        try
+        {
+            var exePath = Process.GetCurrentProcess().MainModule?.FileName;
+            if (string.IsNullOrWhiteSpace(exePath))
+            {
+                AppendLog("无法获取当前程序路径，启动目标代理失败。");
+                return;
+            }
+
+            var args = "--target";
+            if (_targetHwnd != IntPtr.Zero)
+            {
+                args += $" --target-hwnd 0x{_targetHwnd.ToInt64():X}";
+            }
+
+            var psi = new ProcessStartInfo
+            {
+                FileName = exePath,
+                Arguments = args,
+                UseShellExecute = true,
+                WorkingDirectory = AppContext.BaseDirectory
+            };
+
+            var p = Process.Start(psi);
+            AppendLog(p is null ? "启动目标代理失败（Process.Start 返回空）。" : $"已启动目标代理进程。PID={p.Id}");
+        }
+        catch (Exception ex)
+        {
+            AppendLog($"启动目标代理失败：{ex.Message}");
+        }
+    }
+
+    private static IntPtr TryFindDiabloWindow()
+    {
+        var candidates = new[] { "Diablo II", "Resurrected", "Diablo II: Resurrected" };
+        var found = IntPtr.Zero;
+        NativeMethods.EnumWindows((hWnd, _) =>
+        {
+            if (!NativeMethods.IsWindowVisible(hWnd)) return true;
+            var len = NativeMethods.GetWindowTextLength(hWnd);
+            if (len <= 0) return true;
+            if (len > 512) len = 512;
+            var buffer = new char[len + 1];
+            var got = NativeMethods.GetWindowText(hWnd, buffer, buffer.Length);
+            if (got <= 0) return true;
+            var title = new string(buffer, 0, got);
+            for (var i = 0; i < candidates.Length; i++)
+            {
+                if (title.Contains(candidates[i], StringComparison.OrdinalIgnoreCase))
+                {
+                    found = hWnd;
+                    return false;
+                }
+            }
+
+            return true;
+        }, IntPtr.Zero);
+
+        return found;
     }
 
     private void SwapSourceTarget()
@@ -507,15 +652,26 @@ internal sealed class MainForm : Form
     private void ToggleFollow()
     {
         _followEnabled = !_followEnabled;
-        _followLabel.Text = _followEnabled ? "跟随: 开(Ctrl+Shift+Z停止)" : "跟随: 关(Ctrl+Shift+Z停止)";
+        _followLabel.Text = _followEnabled ? "跟随: 开(Ctrl+Shift+E开/关, Ctrl+Shift+Z停止)" : "跟随: 关(Ctrl+Shift+E开/关, Ctrl+Shift+Z停止)";
         AppendLog(_followEnabled ? "已开启跟随。" : "已关闭跟随。");
+
+        if (!_followEnabled && _forcedMovePressed)
+        {
+            _forcedMovePressed = false;
+            var target = _targetHwnd;
+            var source = _sourceHwnd;
+            if (target != IntPtr.Zero && source != IntPtr.Zero)
+            {
+                _ = MirrorService.SendForcedKeyAsync(target, Config.ForcedMoveVk, false, source, _cts.Token);
+            }
+        }
     }
 
     private void StopFollow()
     {
         if (!_followEnabled) return;
         _followEnabled = false;
-        _followLabel.Text = "跟随: 关(Ctrl+Shift+Z停止)";
+        _followLabel.Text = "跟随: 关(Ctrl+Shift+E开/关, Ctrl+Shift+Z停止)";
         AppendLog("已关闭跟随。");
     }
 }

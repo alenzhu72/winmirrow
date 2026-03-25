@@ -13,6 +13,10 @@ internal static class Config
     internal static ScaleMode Scale { get; private set; } = ScaleMode.Auto;
     internal static bool RestoreCursor { get; private set; } = true;
     internal static bool LogCoords { get; private set; }
+    internal static int BurstCount { get; private set; } = 1;
+    internal static int BurstIntervalMs { get; private set; } = 30;
+    internal static bool ForcedMoveEnabled { get; private set; }
+    internal static int ForcedMoveVk { get; private set; } = NativeMethods.VK_E;
 
     internal static void LoadIfChanged()
     {
@@ -55,6 +59,26 @@ internal static class Config
             if (TryParseLogCoords(content, out var logCoords))
             {
                 LogCoords = logCoords;
+            }
+
+            if (TryParseBurstCount(content, out var burstCount))
+            {
+                BurstCount = Math.Clamp(burstCount, 1, 10);
+            }
+
+            if (TryParseBurstInterval(content, out var burstIntervalMs))
+            {
+                BurstIntervalMs = Math.Clamp(burstIntervalMs, 0, 500);
+            }
+
+            if (TryParseForcedMoveEnabled(content, out var forcedEnabled))
+            {
+                ForcedMoveEnabled = forcedEnabled;
+            }
+
+            if (TryParseForcedMoveVk(content, out var forcedVk))
+            {
+                ForcedMoveVk = forcedVk;
             }
         }
     }
@@ -114,5 +138,47 @@ internal static class Config
         var v = match.Groups[2].Value.Trim();
         enabled = string.Equals(v, "true", StringComparison.OrdinalIgnoreCase) || v == "1";
         return true;
+    }
+
+    private static bool TryParseBurstCount(string content, out int count)
+    {
+        count = 1;
+        var match = Regex.Match(content, @"(?im)^\s*(BURST_COUNT|CLICK_BURST)\s*=\s*(\d+)\s*$");
+        if (!match.Success) return false;
+        return int.TryParse(match.Groups[2].Value, NumberStyles.Integer, CultureInfo.InvariantCulture, out count);
+    }
+
+    private static bool TryParseBurstInterval(string content, out int intervalMs)
+    {
+        intervalMs = 30;
+        var match = Regex.Match(content, @"(?im)^\s*(BURST_INTERVAL_MS|CLICK_BURST_INTERVAL_MS)\s*=\s*(\d+)\s*$");
+        if (!match.Success) return false;
+        return int.TryParse(match.Groups[2].Value, NumberStyles.Integer, CultureInfo.InvariantCulture, out intervalMs);
+    }
+
+    private static bool TryParseForcedMoveEnabled(string content, out bool enabled)
+    {
+        enabled = false;
+        var match = Regex.Match(content, @"(?im)^\s*(FORCED_MOVE_ENABLED)\s*=\s*(true|false|1|0)\s*$");
+        if (!match.Success) return false;
+        var v = match.Groups[2].Value.Trim();
+        enabled = string.Equals(v, "true", StringComparison.OrdinalIgnoreCase) || v == "1";
+        return true;
+    }
+
+    private static bool TryParseForcedMoveVk(string content, out int vk)
+    {
+        vk = NativeMethods.VK_E;
+        var match = Regex.Match(content, @"(?im)^\s*(FORCED_MOVE_VK)\s*=\s*([A-Za-z0-9_]+)\s*$");
+        if (!match.Success) return false;
+        var v = match.Groups[2].Value.Trim();
+        if (v.Length == 1)
+        {
+            var c = char.ToUpperInvariant(v[0]);
+            if (c >= 'A' && c <= 'Z') { vk = (int)c; return true; }
+        }
+        if (string.Equals(v, "E", StringComparison.OrdinalIgnoreCase)) { vk = NativeMethods.VK_E; return true; }
+        if (string.Equals(v, "Z", StringComparison.OrdinalIgnoreCase)) { vk = NativeMethods.VK_Z; return true; }
+        return false;
     }
 }

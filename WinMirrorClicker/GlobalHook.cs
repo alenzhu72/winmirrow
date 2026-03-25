@@ -13,7 +13,9 @@ internal sealed class GlobalHook : IDisposable
     private bool _started;
 
     internal event Action<int>? KeyDown;
+    internal event Action<int>? KeyUp;
     internal event Action<int, int>? MouseLeftDown;
+    internal event Action<int, int>? MouseMove;
 
     internal GlobalHook(bool enableKeyboard = true)
     {
@@ -68,6 +70,11 @@ internal sealed class GlobalHook : IDisposable
             var data = Marshal.PtrToStructure<NativeMethods.MSLLHOOKSTRUCT>(lParam);
             MouseLeftDown?.Invoke(data.pt.x, data.pt.y);
         }
+        else if (nCode >= 0 && wParam == (IntPtr)NativeMethods.WM_MOUSEMOVE)
+        {
+            var data = Marshal.PtrToStructure<NativeMethods.MSLLHOOKSTRUCT>(lParam);
+            MouseMove?.Invoke(data.pt.x, data.pt.y);
+        }
 
         return NativeMethods.CallNextHookEx(_mouseHook, nCode, wParam, lParam);
     }
@@ -83,6 +90,11 @@ internal sealed class GlobalHook : IDisposable
         {
             var data = Marshal.PtrToStructure<NativeMethods.KBDLLHOOKSTRUCT>(lParam);
             KeyDown?.Invoke((int)data.vkCode);
+        }
+        else if (nCode >= 0 && (wParam == (IntPtr)NativeMethods.WM_KEYUP || wParam == (IntPtr)NativeMethods.WM_SYSKEYUP))
+        {
+            var data = Marshal.PtrToStructure<NativeMethods.KBDLLHOOKSTRUCT>(lParam);
+            KeyUp?.Invoke((int)data.vkCode);
         }
 
         return NativeMethods.CallNextHookEx(_keyboardHook, nCode, wParam, lParam);
