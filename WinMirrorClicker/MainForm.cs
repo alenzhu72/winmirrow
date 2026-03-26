@@ -15,6 +15,7 @@ internal sealed class MainForm : Form
     private readonly Label _modeLabel = new() { AutoSize = true };
     private readonly Label _pipeLabel = new() { AutoSize = true };
     private readonly Label _followLabel = new() { AutoSize = true };
+    private readonly Label _forcedMoveLabel = new() { AutoSize = true };
     private readonly Button _toggleFollowButton = new() { AutoSize = true, Text = "切换跟随" };
     private readonly Button _launchTargetAgentButton = new() { AutoSize = true, Text = "启动目标代理(--target)" };
     private readonly Button _spawnTargetAgentButton = new() { AutoSize = true, Text = "从窗口2进程启动目标代理" };
@@ -28,21 +29,32 @@ internal sealed class MainForm : Form
     private SourceAgentClient? _client;
     private TargetAgentServer? _server;
     private Task? _serverTask;
+    private Task? _movePumpTask;
 
     private IntPtr _sourceHwnd;
     private IntPtr _targetHwnd;
     private bool _hotkeysRegistered;
     private long _lastBindTick;
+    private long _lastToggleTick;
+    private long _lastMoveSendTick;
+    private long _lastConfigPollTick;
     private Point? _lastSourceClientPoint;
     private Point? _lastTargetClientPoint;
-    private bool _followEnabled = true;
+    private bool _followEnabled;
     private bool _forcedMovePressed;
+    private bool _mode2HeldKeyDown;
+    private int _latestMouseX;
+    private int _latestMouseY;
+    private int _hasLatestMouse;
+    private readonly AutoResetEvent _moveSignal = new(false);
+    private readonly SemaphoreSlim _moveSendGate = new(1, 1);
 
     private const int HotkeyIdBindSource = 1;
     private const int HotkeyIdBindTarget = 2;
     private const int HotkeyIdSwap = 3;
     private const int HotkeyIdStopFollow = 4;
     private const int HotkeyIdMasterToggle = 5;
+    private const int HotkeyIdMasterToggleChord = 6;
 
     internal MainForm(bool runAsTargetAgent, IntPtr? initialTargetHwnd)
     {
@@ -52,7 +64,11 @@ internal sealed class MainForm : Form
 
         Text = "WinMirror Clicker";
         StartPosition = FormStartPosition.CenterScreen;
-        MinimumSize = new Size(640, 420);
+        var workingArea = Screen.PrimaryScreen?.WorkingArea ?? new Rectangle(0, 0, 1920, 1080);
+        var maxWidth = Math.Max(420, workingArea.Width / 3);
+        MaximumSize = new Size(maxWidth, workingArea.Height);
+        MinimumSize = new Size(Math.Min(520, maxWidth), 420);
+        Width = maxWidth;
 
         var root = new TableLayoutPanel
         {
@@ -71,7 +87,7 @@ internal sealed class MainForm : Form
         {
             Text = "F9 绑定窗口1(源) / F10 绑定窗口2(目标)。在窗口1内左键点击后，将在延迟后把相对坐标点击发送到窗口2。",
             AutoSize = true,
-            MaximumSize = new Size(900, 0),
+            MaximumSize = new Size(maxWidth - 24, 0),
         };
 
         root.Controls.Add(title, 0, 0);
@@ -108,22 +124,54 @@ internal sealed class MainForm : Form
 
     private Control BuildRuntimeRow()
     {
-        var row = new FlowLayoutPanel { Dock = DockStyle.Fill, AutoSize = true, WrapContents = false };
+        var row = new TableLayoutPanel
+        {
+            Dock = DockStyle.Fill,
+            AutoSize = true,
+            ColumnCount = 2,
+            RowCount = 1,
+        };
+        row.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+        row.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+
         _modeLabel.Text = _runAsTargetAgent ? "模式: 目标代理 (--target)" : "模式: 源端 (默认)";
         _pipeLabel.Text = $"管道: {IpcDefaults.PipeName}";
-        row.Controls.Add(_modeLabel);
-        row.Controls.Add(new Label { Text = "   ", AutoSize = true });
-        row.Controls.Add(_pipeLabel);
-        row.Controls.Add(new Label { Text = "   ", AutoSize = true });
-        _followLabel.Text = "跟随: 开(Ctrl+Shift+E开/关, Ctrl+Shift+Z停止)";
-        row.Controls.Add(_followLabel);
-        row.Controls.Add(_toggleFollowButton);
+
+        var left = new FlowLayoutPanel
+        {
+            Dock = DockStyle.Fill,
+            AutoSize = true,
+            WrapContents = true,
+            Margin = new Padding(0),
+        };
+        left.Controls.Add(_modeLabel);
+        left.Controls.Add(new Label { Text = "   ", AutoSize = true });
+        left.Controls.Add(_pipeLabel);
+        left.Controls.Add(new Label { Text = "   ", AutoSize = true });
+        _followLabel.Text = "跟随总开关: 关";
+        left.Controls.Add(_followLabel);
+        left.SetFlowBreak(_followLabel, true);
+        _forcedMoveLabel.Text = "强制移动: 关";
+        left.Controls.Add(_forcedMoveLabel);
+        left.SetFlowBreak(_forcedMoveLabel, true);
+
+        var right = new FlowLayoutPanel
+        {
+            AutoSize = true,
+            FlowDirection = FlowDirection.TopDown,
+            WrapContents = false,
+            Anchor = AnchorStyles.Top | AnchorStyles.Right,
+            Margin = new Padding(12, 10, 0, 0),
+        };
+        right.Controls.Add(_toggleFollowButton);
         if (!_runAsTargetAgent)
         {
-            row.Controls.Add(new Label { Text = "   ", AutoSize = true });
-            row.Controls.Add(_launchTargetAgentButton);
-            row.Controls.Add(_spawnTargetAgentButton);
+            right.Controls.Add(_launchTargetAgentButton);
+            right.Controls.Add(_spawnTargetAgentButton);
         }
+
+        row.Controls.Add(left, 0, 0);
+        row.Controls.Add(right, 1, 0);
         return row;
     }
 
@@ -133,6 +181,7 @@ internal sealed class MainForm : Form
         {
             Config.LoadIfChanged();
             UpdateDelayLabel();
+            UpdateFollowUi();
 
             _hook.KeyDown += OnGlobalKeyDownFallback;
             _hook.KeyUp += OnGlobalKeyUpFallback;
@@ -144,6 +193,7 @@ internal sealed class MainForm : Form
             AppendLog($"当前进程 Session={Process.GetCurrentProcess().SessionId}");
             AppendLog($"配置文件: {Path.Combine(AppContext.BaseDirectory, "config.txt")}");
             RegisterHotkeys();
+            _movePumpTask = Task.Run(() => MovePumpLoopAsync(_cts.Token), _cts.Token);
 
             if (_runAsTargetAgent)
             {
@@ -182,28 +232,62 @@ internal sealed class MainForm : Form
         _client?.Dispose();
         _server?.Dispose();
         _cts.Dispose();
+        _moveSignal.Set();
     }
 
     private void OnGlobalKeyDownFallback(int vkCode)
     {
+        PollConfigThrottled();
+
+        if (!IsHandleCreated) return;
+
+        var now = Stopwatch.GetTimestamp();
+        var lastToggle = Interlocked.Read(ref _lastToggleTick);
+        var deltaToggleMs = lastToggle != 0 ? (now - lastToggle) * 1000.0 / Stopwatch.Frequency : double.MaxValue;
+        var allowToggle = deltaToggleMs >= 180;
+
+        var ctrlDown = (NativeMethods.GetAsyncKeyState(NativeMethods.VK_CONTROL) & 0x8000) != 0;
+        var shiftDown = (NativeMethods.GetAsyncKeyState(NativeMethods.VK_SHIFT) & 0x8000) != 0;
+
+        if (vkCode == NativeMethods.VK_F12 && allowToggle)
+        {
+            Interlocked.Exchange(ref _lastToggleTick, now);
+            BeginInvoke(new Action(() =>
+            {
+                Config.LoadIfChanged();
+                if (Config.FollowMode == 2) ToggleMode2HeldKey();
+                else ToggleFollow();
+            }));
+            return;
+        }
+
+        if (ctrlDown && shiftDown)
+        {
+            if (vkCode == NativeMethods.VK_Z && allowToggle)
+            {
+                Interlocked.Exchange(ref _lastToggleTick, now);
+                BeginInvoke(new Action(StopFollow));
+                return;
+            }
+
+            if (vkCode == Config.ForcedMoveVk && allowToggle)
+            {
+                Interlocked.Exchange(ref _lastToggleTick, now);
+                BeginInvoke(new Action(ToggleFollow));
+                return;
+            }
+        }
+
         if (Config.ForcedMoveEnabled && vkCode == Config.ForcedMoveVk)
         {
-            _forcedMovePressed = true;
-            AppendLog("源端强制移动键已按下。");
-            var target = _targetHwnd;
-            var source = _sourceHwnd;
-            if (target != IntPtr.Zero && source != IntPtr.Zero)
-            {
-                _ = MirrorService.SendForcedKeyAsync(target, Config.ForcedMoveVk, true, source, _cts.Token);
-            }
+            SetForcedMovePressed(true);
             return;
         }
 
         if (vkCode != NativeMethods.VK_F9 && vkCode != NativeMethods.VK_F10) return;
-        if (!IsHandleCreated) return;
         if (_runAsTargetAgent && vkCode == NativeMethods.VK_F9) return;
 
-        var now = Stopwatch.GetTimestamp();
+        now = Stopwatch.GetTimestamp();
         var last = Interlocked.Read(ref _lastBindTick);
         if (last != 0)
         {
@@ -223,16 +307,10 @@ internal sealed class MainForm : Form
     private void OnGlobalKeyUpFallback(int vkCode)
     {
         if (!IsHandleCreated) return;
+        PollConfigThrottled();
         if (Config.ForcedMoveEnabled && vkCode == Config.ForcedMoveVk)
         {
-            _forcedMovePressed = false;
-            AppendLog("源端强制移动键已抬起。");
-            var target = _targetHwnd;
-            var source = _sourceHwnd;
-            if (target != IntPtr.Zero && source != IntPtr.Zero)
-            {
-                _ = MirrorService.SendForcedKeyAsync(target, Config.ForcedMoveVk, false, source, _cts.Token);
-            }
+            SetForcedMovePressed(false);
         }
     }
 
@@ -240,12 +318,13 @@ internal sealed class MainForm : Form
     {
         if (_runAsTargetAgent) return;
         if (!_followEnabled) return;
+        Config.LoadIfChanged();
+        if (Config.FollowMode == 2) return;
 
         var source = _sourceHwnd;
         if (source == IntPtr.Zero) return;
         if (NativeMethods.GetForegroundWindow() != source) return;
 
-        Config.LoadIfChanged();
         var delayMs = Config.ClickDelayMs;
 
         if (!MirrorService.TryGetClientPoint(source, new Point(x, y), out var clientPoint)) return;
@@ -291,28 +370,113 @@ internal sealed class MainForm : Form
     private void OnGlobalMouseMove(int x, int y)
     {
         if (_runAsTargetAgent) return;
-        if (!_followEnabled) return;
-        if (Config.ForcedMoveEnabled)
+        if (!Volatile.Read(ref _followEnabled)) return;
+        Interlocked.Exchange(ref _latestMouseX, x);
+        Interlocked.Exchange(ref _latestMouseY, y);
+        Volatile.Write(ref _hasLatestMouse, 1);
+        _moveSignal.Set();
+    }
+
+    private void PollConfigThrottled()
+    {
+        var now = Stopwatch.GetTimestamp();
+        var last = Interlocked.Read(ref _lastConfigPollTick);
+        if (last != 0)
         {
-            if (_forcedMovePressed == false && KeyboardForcedMoveIsPressed())
+            var deltaMs = (now - last) * 1000.0 / Stopwatch.Frequency;
+            if (deltaMs < 250) return;
+        }
+        Interlocked.Exchange(ref _lastConfigPollTick, now);
+        Config.LoadIfChanged();
+    }
+
+    private async Task MovePumpLoopAsync(CancellationToken cancellationToken)
+    {
+        while (!cancellationToken.IsCancellationRequested)
+        {
+            _moveSignal.WaitOne(250);
+            if (cancellationToken.IsCancellationRequested) return;
+            if (_runAsTargetAgent) continue;
+            if (!Volatile.Read(ref _followEnabled)) continue;
+            if (Volatile.Read(ref _hasLatestMouse) == 0) continue;
+
+            PollConfigThrottled();
+
+            var intervalMs = Config.MouseMoveIntervalMs;
+            if (Config.FollowMode != 2 && intervalMs > 0)
             {
-                _forcedMovePressed = true;
-                AppendLog("源端强制移动键已按下。");
+                var now = Stopwatch.GetTimestamp();
+                var last = Interlocked.Read(ref _lastMoveSendTick);
+                if (last != 0)
+                {
+                    var deltaMs = (now - last) * 1000.0 / Stopwatch.Frequency;
+                    if (deltaMs < intervalMs) continue;
+                }
+                Interlocked.Exchange(ref _lastMoveSendTick, now);
             }
 
-            if (_forcedMovePressed)
+            var source = _sourceHwnd;
+            var target = _targetHwnd;
+            if (source == IntPtr.Zero || target == IntPtr.Zero) continue;
+
+            var x = Volatile.Read(ref _latestMouseX);
+            var y = Volatile.Read(ref _latestMouseY);
+            var pos = new Point(x, y);
+
+            if (!await _moveSendGate.WaitAsync(0, cancellationToken).ConfigureAwait(false)) continue;
+            try
             {
-                var source = _sourceHwnd;
-                var target = _targetHwnd;
-                if (source == IntPtr.Zero || target == IntPtr.Zero) return;
-                _ = _mirror.MirrorForcedMoveAsync(source, target, new Point(x, y), _cts.Token);
+                if (Config.FollowMode == 2)
+                {
+                    await _mirror.MirrorMouseMovePostMessageAsync(source, target, pos).ConfigureAwait(false);
+                }
+                else if (Config.ForcedMoveEnabled)
+                {
+                    var pressed = KeyboardForcedMoveIsPressed();
+                    if (_forcedMovePressed != pressed)
+                    {
+                        BeginInvoke(new Action(() => SetForcedMovePressed(pressed)));
+                    }
+
+                    if (pressed)
+                    {
+                        await _mirror.MirrorForcedMoveAsync(source, target, pos, cancellationToken).ConfigureAwait(false);
+                    }
+                }
+            }
+            catch
+            {
+            }
+            finally
+            {
+                _moveSendGate.Release();
             }
         }
     }
 
     private bool KeyboardForcedMoveIsPressed()
     {
-        return false;
+        var state = NativeMethods.GetAsyncKeyState(Config.ForcedMoveVk);
+        return (state & 0x8000) != 0;
+    }
+
+    private void SetForcedMovePressed(bool pressed)
+    {
+        if (_forcedMovePressed == pressed) return;
+        _forcedMovePressed = pressed;
+
+        if (!_followEnabled)
+        {
+            UpdateFollowUi();
+            return;
+        }
+
+        var target = _targetHwnd;
+        var source = _sourceHwnd;
+        if (target == IntPtr.Zero || source == IntPtr.Zero) return;
+        _ = MirrorService.SendForcedKeyAsync(target, Config.ForcedMoveVk, pressed, source, _cts.Token);
+        AppendLog(pressed ? "源端强制移动键已按下。" : "源端强制移动键已抬起。");
+        UpdateFollowUi();
     }
 
     private void OnIpcCommand(MirrorClickCommand cmd)
@@ -448,7 +612,14 @@ internal sealed class MainForm : Form
             }
             else if (id == HotkeyIdMasterToggle)
             {
-                ToggleFollow();
+                Config.LoadIfChanged();
+                if (Config.FollowMode == 2) ToggleMode2HeldKey();
+                else ToggleFollow();
+            }
+            else if (id == HotkeyIdMasterToggleChord)
+            {
+                Config.LoadIfChanged();
+                if (Config.FollowMode != 2) ToggleFollow();
             }
         }
 
@@ -460,14 +631,17 @@ internal sealed class MainForm : Form
         if (_hotkeysRegistered) return;
         if (!IsHandleCreated) return;
 
+        Config.LoadIfChanged();
         var okTarget = NativeMethods.RegisterHotKey(Handle, HotkeyIdBindTarget, NativeMethods.MOD_NOREPEAT, NativeMethods.VK_F10);
         var okSource = _runAsTargetAgent || NativeMethods.RegisterHotKey(Handle, HotkeyIdBindSource, NativeMethods.MOD_NOREPEAT, NativeMethods.VK_F9);
         var okSwap = NativeMethods.RegisterHotKey(Handle, HotkeyIdSwap, NativeMethods.MOD_NOREPEAT, NativeMethods.VK_F11);
         var okStop = NativeMethods.RegisterHotKey(Handle, HotkeyIdStopFollow, NativeMethods.MOD_CONTROL | NativeMethods.MOD_SHIFT | NativeMethods.MOD_NOREPEAT, NativeMethods.VK_Z);
-        var okMaster = NativeMethods.RegisterHotKey(Handle, HotkeyIdMasterToggle, NativeMethods.MOD_CONTROL | NativeMethods.MOD_SHIFT | NativeMethods.MOD_NOREPEAT, (uint)Config.ForcedMoveVk);
+        var okMaster = NativeMethods.RegisterHotKey(Handle, HotkeyIdMasterToggle, NativeMethods.MOD_NOREPEAT, NativeMethods.VK_F12);
+        var okChord = NativeMethods.RegisterHotKey(Handle, HotkeyIdMasterToggleChord, NativeMethods.MOD_CONTROL | NativeMethods.MOD_SHIFT | NativeMethods.MOD_NOREPEAT, (uint)Config.ForcedMoveVk);
 
-        _hotkeysRegistered = okTarget && okSource && okSwap && okStop && okMaster;
-        AppendLog(_hotkeysRegistered ? "已注册全局热键(F9/F10/F11 + Ctrl+Shift+E开/关 + Ctrl+Shift+Z停止)。" : "注册全局热键失败（可能被其他程序占用）。");
+        _hotkeysRegistered = okTarget && okSource && okSwap && okStop && okMaster && okChord;
+        var vkText = Config.ForcedMoveVk >= 'A' && Config.ForcedMoveVk <= 'Z' ? ((char)Config.ForcedMoveVk).ToString() : $"VK_{Config.ForcedMoveVk}";
+        AppendLog(_hotkeysRegistered ? $"已注册全局热键(F9/F10/F11 + F12开/关 + Ctrl+Shift+{vkText}开/关 + Ctrl+Shift+Z停止)。" : "注册全局热键失败（可能被其他程序占用）。");
     }
 
     private void UnregisterHotkeys()
@@ -480,6 +654,7 @@ internal sealed class MainForm : Form
         NativeMethods.UnregisterHotKey(Handle, HotkeyIdSwap);
         NativeMethods.UnregisterHotKey(Handle, HotkeyIdStopFollow);
         NativeMethods.UnregisterHotKey(Handle, HotkeyIdMasterToggle);
+        NativeMethods.UnregisterHotKey(Handle, HotkeyIdMasterToggleChord);
         _hotkeysRegistered = false;
     }
 
@@ -652,8 +827,19 @@ internal sealed class MainForm : Form
     private void ToggleFollow()
     {
         _followEnabled = !_followEnabled;
-        _followLabel.Text = _followEnabled ? "跟随: 开(Ctrl+Shift+E开/关, Ctrl+Shift+Z停止)" : "跟随: 关(Ctrl+Shift+E开/关, Ctrl+Shift+Z停止)";
+        UpdateFollowUi();
         AppendLog(_followEnabled ? "已开启跟随。" : "已关闭跟随。");
+
+        if (_followEnabled && Config.ForcedMoveEnabled && _forcedMovePressed)
+        {
+            var target = _targetHwnd;
+            var source = _sourceHwnd;
+            if (target != IntPtr.Zero && source != IntPtr.Zero)
+            {
+                _ = MirrorService.SendForcedKeyAsync(target, Config.ForcedMoveVk, true, source, _cts.Token);
+                AppendLog("源端强制移动键已按下。");
+            }
+        }
 
         if (!_followEnabled && _forcedMovePressed)
         {
@@ -665,13 +851,97 @@ internal sealed class MainForm : Form
                 _ = MirrorService.SendForcedKeyAsync(target, Config.ForcedMoveVk, false, source, _cts.Token);
             }
         }
+        if (!_followEnabled && _mode2HeldKeyDown)
+        {
+            ReleaseMode2HeldKey();
+        }
+        UpdateFollowUi();
     }
 
     private void StopFollow()
     {
         if (!_followEnabled) return;
         _followEnabled = false;
-        _followLabel.Text = "跟随: 关(Ctrl+Shift+E开/关, Ctrl+Shift+Z停止)";
+        UpdateFollowUi();
         AppendLog("已关闭跟随。");
+
+        if (_forcedMovePressed)
+        {
+            _forcedMovePressed = false;
+            var target = _targetHwnd;
+            var source = _sourceHwnd;
+            if (target != IntPtr.Zero && source != IntPtr.Zero)
+            {
+                _ = MirrorService.SendForcedKeyAsync(target, Config.ForcedMoveVk, false, source, _cts.Token);
+            }
+            UpdateFollowUi();
+        }
+        if (_mode2HeldKeyDown)
+        {
+            ReleaseMode2HeldKey();
+            UpdateFollowUi();
+        }
+    }
+
+    private void UpdateFollowUi()
+    {
+        Config.LoadIfChanged();
+
+        var follow = _followEnabled ? "开" : "关";
+        var vkText = Config.ForcedMoveVk >= 'A' && Config.ForcedMoveVk <= 'Z' ? ((char)Config.ForcedMoveVk).ToString() : $"VK_{Config.ForcedMoveVk}";
+        var forced = Config.ForcedMoveEnabled ? "开" : "关";
+        var pressed = _forcedMovePressed ? "按下" : "抬起";
+        var requireFg = Config.FollowRequireSourceForeground ? "需要" : "不需要";
+        var fmMethod = $"{Config.ForcedMoveSendMethod}/{(Config.ForcedMoveFocusTarget ? "切前台" : "不切前台")}";
+        var hotkey = _hotkeysRegistered ? "OK" : "冲突(已用钩子兜底)";
+        var modeText = Config.FollowMode == 2 ? "模式2(仅跟随)" : "模式1(点击+跟随)";
+        var mode2Key = _mode2HeldKeyDown ? "已按住" : "未按住";
+        var moveInterval = Config.MouseMoveIntervalMs;
+
+        _toggleFollowButton.Text = _followEnabled ? "跟随: 开" : "跟随: 关";
+        _toggleFollowButton.BackColor = _followEnabled ? Color.DarkSeaGreen : SystemColors.Control;
+        _followLabel.Text = Config.FollowMode == 2
+            ? $"模式2：F12 切换 {vkText} 按住/松开  热键:{hotkey}"
+            : $"跟随总开关: {follow}  {modeText}  (F12 / Ctrl+Shift+{vkText})  停止: Ctrl+Shift+Z  热键:{hotkey}";
+        _forcedMoveLabel.Text = Config.FollowMode == 2
+            ? $"强制移动: {forced}  键:{vkText}  E(目标):{mode2Key}  源前台:{requireFg}  注入:PostMessage  Move间隔:忽略"
+            : $"强制移动: {forced}  键:{vkText}  键状态:{pressed}  源前台:{requireFg}  注入:{fmMethod}";
+    }
+
+    private void ToggleMode2HeldKey()
+    {
+        Config.LoadIfChanged();
+        if (Config.FollowMode != 2) return;
+        if (_mode2HeldKeyDown)
+        {
+            ReleaseMode2HeldKey();
+            UpdateFollowUi();
+        }
+        else
+        {
+            var target = _targetHwnd;
+            if (target == IntPtr.Zero) return;
+            _mode2HeldKeyDown = true;
+            _followEnabled = true;
+            MirrorService.PostKeyAsync(target, Config.ForcedMoveVk, true);
+            AppendLog($"模式2：已按住 {FormatVk(Config.ForcedMoveVk)}。");
+            UpdateFollowUi();
+        }
+    }
+
+    private void ReleaseMode2HeldKey()
+    {
+        if (!_mode2HeldKeyDown) return;
+        var target = _targetHwnd;
+        _mode2HeldKeyDown = false;
+        _followEnabled = false;
+        if (target == IntPtr.Zero) return;
+        MirrorService.PostKeyAsync(target, Config.ForcedMoveVk, false);
+        AppendLog($"模式2：已松开 {FormatVk(Config.ForcedMoveVk)}。");
+    }
+
+    private static string FormatVk(int vk)
+    {
+        return vk >= 'A' && vk <= 'Z' ? ((char)vk).ToString() : $"VK_{vk}";
     }
 }

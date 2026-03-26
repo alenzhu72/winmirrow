@@ -17,6 +17,11 @@ internal static class Config
     internal static int BurstIntervalMs { get; private set; } = 30;
     internal static bool ForcedMoveEnabled { get; private set; }
     internal static int ForcedMoveVk { get; private set; } = NativeMethods.VK_E;
+    internal static ClickSendMethod ForcedMoveSendMethod { get; private set; } = ClickSendMethod.PostMessage;
+    internal static bool ForcedMoveFocusTarget { get; private set; }
+    internal static bool FollowRequireSourceForeground { get; private set; }
+    internal static int FollowMode { get; private set; } = 1;
+    internal static int MouseMoveIntervalMs { get; private set; } = 8;
 
     internal static void LoadIfChanged()
     {
@@ -27,6 +32,18 @@ internal static class Config
             {
                 ClickDelayMs = 100;
                 SendMethod = ClickSendMethod.PostMessage;
+                Scale = ScaleMode.Auto;
+                RestoreCursor = true;
+                LogCoords = false;
+                BurstCount = 1;
+                BurstIntervalMs = 30;
+                ForcedMoveEnabled = false;
+                ForcedMoveVk = NativeMethods.VK_E;
+                ForcedMoveSendMethod = ClickSendMethod.PostMessage;
+                ForcedMoveFocusTarget = false;
+                FollowRequireSourceForeground = false;
+                FollowMode = 1;
+                MouseMoveIntervalMs = 8;
                 _lastWriteUtc = default;
                 return;
             }
@@ -79,6 +96,31 @@ internal static class Config
             if (TryParseForcedMoveVk(content, out var forcedVk))
             {
                 ForcedMoveVk = forcedVk;
+            }
+
+            if (TryParseForcedMoveMethod(content, out var forcedMethod))
+            {
+                ForcedMoveSendMethod = forcedMethod;
+            }
+
+            if (TryParseForcedMoveFocusTarget(content, out var focusTarget))
+            {
+                ForcedMoveFocusTarget = focusTarget;
+            }
+
+            if (TryParseFollowRequireSourceForeground(content, out var requireFg))
+            {
+                FollowRequireSourceForeground = requireFg;
+            }
+
+            if (TryParseFollowMode(content, out var followMode))
+            {
+                FollowMode = followMode;
+            }
+
+            if (TryParseMouseMoveIntervalMs(content, out var moveIntervalMs))
+            {
+                MouseMoveIntervalMs = Math.Clamp(moveIntervalMs, 0, 100);
             }
         }
     }
@@ -180,5 +222,57 @@ internal static class Config
         if (string.Equals(v, "E", StringComparison.OrdinalIgnoreCase)) { vk = NativeMethods.VK_E; return true; }
         if (string.Equals(v, "Z", StringComparison.OrdinalIgnoreCase)) { vk = NativeMethods.VK_Z; return true; }
         return false;
+    }
+
+    private static bool TryParseForcedMoveMethod(string content, out ClickSendMethod method)
+    {
+        method = ClickSendMethod.PostMessage;
+        var match = Regex.Match(content, @"(?im)^\s*(FORCED_MOVE_METHOD|FORCED_MOVE_SEND_METHOD)\s*=\s*([A-Z0-9_]+)\s*$");
+        if (!match.Success) return false;
+
+        var v = match.Groups[2].Value.Trim();
+        if (string.Equals(v, "POSTMESSAGE", StringComparison.OrdinalIgnoreCase)) { method = ClickSendMethod.PostMessage; return true; }
+        if (string.Equals(v, "SENDINPUT", StringComparison.OrdinalIgnoreCase)) { method = ClickSendMethod.SendInput; return true; }
+        if (string.Equals(v, "INPUT", StringComparison.OrdinalIgnoreCase)) { method = ClickSendMethod.SendInput; return true; }
+        return false;
+    }
+
+    private static bool TryParseForcedMoveFocusTarget(string content, out bool enabled)
+    {
+        enabled = false;
+        var match = Regex.Match(content, @"(?im)^\s*(FORCED_MOVE_FOCUS_TARGET|FOCUS_TARGET)\s*=\s*(true|false|1|0)\s*$");
+        if (!match.Success) return false;
+        var v = match.Groups[2].Value.Trim();
+        enabled = string.Equals(v, "true", StringComparison.OrdinalIgnoreCase) || v == "1";
+        return true;
+    }
+
+    private static bool TryParseFollowRequireSourceForeground(string content, out bool enabled)
+    {
+        enabled = false;
+        var match = Regex.Match(content, @"(?im)^\s*(FOLLOW_REQUIRE_SOURCE_FOREGROUND|REQUIRE_SOURCE_FOREGROUND)\s*=\s*(true|false|1|0)\s*$");
+        if (!match.Success) return false;
+        var v = match.Groups[2].Value.Trim();
+        enabled = string.Equals(v, "true", StringComparison.OrdinalIgnoreCase) || v == "1";
+        return true;
+    }
+
+    private static bool TryParseFollowMode(string content, out int mode)
+    {
+        mode = 1;
+        var match = Regex.Match(content, @"(?im)^\s*(FOLLOW_MODE)\s*=\s*([A-Z0-9_]+)\s*$");
+        if (!match.Success) return false;
+        var v = match.Groups[2].Value.Trim();
+        if (v == "1" || string.Equals(v, "MODE1", StringComparison.OrdinalIgnoreCase)) { mode = 1; return true; }
+        if (v == "2" || string.Equals(v, "MODE2", StringComparison.OrdinalIgnoreCase)) { mode = 2; return true; }
+        return false;
+    }
+
+    private static bool TryParseMouseMoveIntervalMs(string content, out int intervalMs)
+    {
+        intervalMs = 8;
+        var match = Regex.Match(content, @"(?im)^\s*(MOUSE_MOVE_INTERVAL_MS|MOVE_INTERVAL_MS)\s*=\s*(\d+)\s*$");
+        if (!match.Success) return false;
+        return int.TryParse(match.Groups[2].Value, NumberStyles.Integer, CultureInfo.InvariantCulture, out intervalMs);
     }
 }

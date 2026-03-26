@@ -4,6 +4,13 @@ namespace WinMirrorClicker;
 
 internal sealed class MirrorService
 {
+    internal static void PostKeyAsync(IntPtr targetHwnd, int vk, bool down)
+    {
+        if (!NativeMethods.IsWindow(targetHwnd)) return;
+        var msg = down ? NativeMethods.WM_KEYDOWN : NativeMethods.WM_KEYUP;
+        NativeMethods.PostMessage(targetHwnd, msg, (IntPtr)vk, IntPtr.Zero);
+    }
+
     internal Task MirrorLeftClickAsync(IntPtr sourceHwnd, IntPtr targetHwnd, Point screenPos, CancellationToken cancellationToken)
     {
         if (sourceHwnd == IntPtr.Zero || targetHwnd == IntPtr.Zero) return Task.CompletedTask;
@@ -36,13 +43,52 @@ internal sealed class MirrorService
 
     internal Task MirrorForcedMoveAsync(IntPtr sourceHwnd, IntPtr targetHwnd, Point screenPos, CancellationToken cancellationToken)
     {
+        Config.LoadIfChanged();
         if (!Config.ForcedMoveEnabled) return Task.CompletedTask;
         if (sourceHwnd == IntPtr.Zero || targetHwnd == IntPtr.Zero) return Task.CompletedTask;
-        if (NativeMethods.GetForegroundWindow() != sourceHwnd) return Task.CompletedTask;
-        if (!TryGetClientPoint(sourceHwnd, screenPos, out var clientPoint)) return Task.CompletedTask;
-        TryGetClientSize(sourceHwnd, out var sourceW, out var sourceH);
+        if (Config.FollowRequireSourceForeground && NativeMethods.GetForegroundWindow() != sourceHwnd) return Task.CompletedTask;
+        if (!TryGetClientPointClamped(sourceHwnd, screenPos, out var clientPoint, out var sourceW, out var sourceH)) return Task.CompletedTask;
         var (tx, ty) = ApplyScaling(clientPoint.X, clientPoint.Y, targetHwnd, sourceW, sourceH);
-        return MirrorForcedMoveCoreAsync(targetHwnd, tx, ty, cancellationToken, restoreForeground: sourceHwnd);
+        return MirrorMoveCoreAsync(sourceHwnd, targetHwnd, tx, ty, cancellationToken);
+    }
+
+    internal Task MirrorMouseMoveAsync(IntPtr sourceHwnd, IntPtr targetHwnd, Point screenPos, CancellationToken cancellationToken)
+    {
+        Config.LoadIfChanged();
+        if (sourceHwnd == IntPtr.Zero || targetHwnd == IntPtr.Zero) return Task.CompletedTask;
+        if (Config.FollowMode != 2 && Config.FollowRequireSourceForeground && NativeMethods.GetForegroundWindow() != sourceHwnd) return Task.CompletedTask;
+        if (!TryGetClientPointClamped(sourceHwnd, screenPos, out var clientPoint, out var sourceW, out var sourceH)) return Task.CompletedTask;
+        var (tx, ty) = ApplyScaling(clientPoint.X, clientPoint.Y, targetHwnd, sourceW, sourceH);
+        return MirrorMoveCoreAsync(sourceHwnd, targetHwnd, tx, ty, cancellationToken);
+    }
+
+    internal Task MirrorMouseMovePostMessageAsync(IntPtr sourceHwnd, IntPtr targetHwnd, Point screenPos)
+    {
+        if (sourceHwnd == IntPtr.Zero || targetHwnd == IntPtr.Zero) return Task.CompletedTask;
+        if (!NativeMethods.IsWindow(sourceHwnd) || !NativeMethods.IsWindow(targetHwnd)) return Task.CompletedTask;
+
+        Config.LoadIfChanged();
+        if (!TryGetClientPointClamped(sourceHwnd, screenPos, out var clientPoint, out var sourceW, out var sourceH)) return Task.CompletedTask;
+        var (tx, ty) = ApplyScaling(clientPoint.X, clientPoint.Y, targetHwnd, sourceW, sourceH);
+
+        var lParam = NativeMethods.MakeLParam(tx, ty);
+        NativeMethods.PostMessage(targetHwnd, NativeMethods.WM_MOUSEMOVE, IntPtr.Zero, lParam);
+        return Task.CompletedTask;
+    }
+
+    private static Task MirrorMoveCoreAsync(IntPtr sourceHwnd, IntPtr targetHwnd, int targetClientX, int targetClientY, CancellationToken cancellationToken)
+    {
+        var method = Config.ForcedMoveSendMethod;
+        if (method == ClickSendMethod.SendInput && !Config.ForcedMoveFocusTarget)
+        {
+            method = ClickSendMethod.PostMessage;
+        }
+
+        return method switch
+        {
+            ClickSendMethod.SendInput => MirrorForcedMoveCoreAsync(targetHwnd, targetClientX, targetClientY, cancellationToken, restoreForeground: sourceHwnd, focusTarget: true),
+            _ => MirrorForcedMoveViaPostMessageAsync(targetHwnd, targetClientX, targetClientY),
+        };
     }
 
     internal static bool TryGetClientPoint(IntPtr hwnd, Point screenPos, out Point clientPoint)
@@ -53,6 +99,30 @@ internal sealed class MirrorService
         var pt = new NativeMethods.POINT { x = screenPos.X, y = screenPos.Y };
         if (!NativeMethods.ScreenToClient(hwnd, ref pt)) return false;
         clientPoint = new Point(pt.x, pt.y);
+        return true;
+    }
+
+    private static bool TryGetClientPointInBounds(IntPtr hwnd, Point screenPos, out Point clientPoint)
+    {
+        clientPoint = default;
+        if (!TryGetClientPoint(hwnd, screenPos, out var pt)) return false;
+        if (!TryGetClientSize(hwnd, out var w, out var h)) return false;
+        if (pt.X < 0 || pt.Y < 0 || pt.X >= w || pt.Y >= h) return false;
+        clientPoint = pt;
+        return true;
+    }
+
+    private static bool TryGetClientPointClamped(IntPtr hwnd, Point screenPos, out Point clientPoint, out int clientW, out int clientH)
+    {
+        clientPoint = default;
+        clientW = 0;
+        clientH = 0;
+        if (!TryGetClientPoint(hwnd, screenPos, out var pt)) return false;
+        if (!TryGetClientSize(hwnd, out clientW, out clientH)) return false;
+        if (clientW <= 0 || clientH <= 0) return false;
+        var x = Math.Clamp(pt.X, 0, clientW - 1);
+        var y = Math.Clamp(pt.Y, 0, clientH - 1);
+        clientPoint = new Point(x, y);
         return true;
     }
 
@@ -257,17 +327,28 @@ internal sealed class MirrorService
         NativeMethods.SendInput((uint)inputs.Length, inputs, System.Runtime.InteropServices.Marshal.SizeOf<NativeMethods.INPUT>());
     }
 
-    private static async Task MirrorForcedMoveCoreAsync(IntPtr targetHwnd, int clientX, int clientY, CancellationToken cancellationToken, IntPtr? restoreForeground)
+    private static Task MirrorForcedMoveViaPostMessageAsync(IntPtr targetHwnd, int clientX, int clientY)
+    {
+        if (!NativeMethods.IsWindow(targetHwnd)) return Task.CompletedTask;
+        var lParam = NativeMethods.MakeLParam(clientX, clientY);
+        NativeMethods.PostMessage(targetHwnd, NativeMethods.WM_MOUSEMOVE, IntPtr.Zero, lParam);
+        return Task.CompletedTask;
+    }
+
+    private static async Task MirrorForcedMoveCoreAsync(IntPtr targetHwnd, int clientX, int clientY, CancellationToken cancellationToken, IntPtr? restoreForeground, bool focusTarget)
     {
         if (!NativeMethods.IsWindow(targetHwnd)) return;
         var previousForeground = NativeMethods.GetForegroundWindow();
         var hasPrevCursor = NativeMethods.GetCursorPos(out var prevCursor);
-        TryActivateWindow(targetHwnd);
+        if (focusTarget)
+        {
+            TryActivateWindow(targetHwnd);
+        }
         if (!TryClientToScreen(targetHwnd, clientX, clientY, out var screenX, out var screenY)) return;
         SendMouseMoveOnly(screenX, screenY);
         await Task.Delay(1, cancellationToken).ConfigureAwait(false);
         var restore = restoreForeground.GetValueOrDefault(previousForeground);
-        if (restore != IntPtr.Zero && NativeMethods.IsWindow(restore)) TryActivateWindow(restore);
+        if (focusTarget && restore != IntPtr.Zero && NativeMethods.IsWindow(restore)) TryActivateWindow(restore);
         if (Config.RestoreCursor && hasPrevCursor) RestoreCursor(prevCursor.x, prevCursor.y);
     }
 
@@ -297,6 +378,21 @@ internal sealed class MirrorService
     internal static async Task SendForcedKeyAsync(IntPtr targetHwnd, int vk, bool down, IntPtr? restoreForeground, CancellationToken cancellationToken)
     {
         if (!NativeMethods.IsWindow(targetHwnd)) return;
+        Config.LoadIfChanged();
+        var method = Config.ForcedMoveSendMethod;
+        if (method == ClickSendMethod.SendInput && !Config.ForcedMoveFocusTarget)
+        {
+            method = ClickSendMethod.PostMessage;
+        }
+
+        if (method == ClickSendMethod.PostMessage)
+        {
+            var msg = down ? NativeMethods.WM_KEYDOWN : NativeMethods.WM_KEYUP;
+            NativeMethods.PostMessage(targetHwnd, msg, (IntPtr)vk, IntPtr.Zero);
+            await Task.Delay(1, cancellationToken).ConfigureAwait(false);
+            return;
+        }
+
         var previousForeground = NativeMethods.GetForegroundWindow();
         TryActivateWindow(targetHwnd);
         var input = new NativeMethods.INPUT
