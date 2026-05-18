@@ -14,9 +14,6 @@ WinMirrorClicker/obj/
 # Logs
 *.log
 
-# Runtime files
-WinMirrorClicker/config.txt
-
 # OS junk
 .DS_Store
 Thumbs.db

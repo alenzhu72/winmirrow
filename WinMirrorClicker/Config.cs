@@ -10,18 +10,18 @@ internal static class Config
 
     internal static int ClickDelayMs { get; private set; } = 100;
     internal static ClickSendMethod SendMethod { get; private set; } = ClickSendMethod.PostMessage;
-    internal static ScaleMode Scale { get; private set; } = ScaleMode.Auto;
+    internal static ScaleMode Scale { get; private set; } = ScaleMode.None;
     internal static bool RestoreCursor { get; private set; } = true;
     internal static bool LogCoords { get; private set; }
     internal static int BurstCount { get; private set; } = 1;
     internal static int BurstIntervalMs { get; private set; } = 30;
-    internal static bool ForcedMoveEnabled { get; private set; }
+    internal static bool ForcedMoveEnabled { get; private set; } = true;
     internal static int ForcedMoveVk { get; private set; } = NativeMethods.VK_E;
     internal static ClickSendMethod ForcedMoveSendMethod { get; private set; } = ClickSendMethod.PostMessage;
     internal static bool ForcedMoveFocusTarget { get; private set; }
     internal static bool FollowRequireSourceForeground { get; private set; }
-    internal static int FollowMode { get; private set; } = 1;
-    internal static int MouseMoveIntervalMs { get; private set; } = 8;
+    internal static int FollowMode { get; private set; } = 2;
+    internal static int MouseMoveIntervalMs { get; private set; } = 4;
 
     internal static void LoadIfChanged()
     {
@@ -32,18 +32,18 @@ internal static class Config
             {
                 ClickDelayMs = 100;
                 SendMethod = ClickSendMethod.PostMessage;
-                Scale = ScaleMode.Auto;
+                Scale = ScaleMode.None;
                 RestoreCursor = true;
                 LogCoords = false;
                 BurstCount = 1;
                 BurstIntervalMs = 30;
-                ForcedMoveEnabled = false;
+                ForcedMoveEnabled = true;
                 ForcedMoveVk = NativeMethods.VK_E;
                 ForcedMoveSendMethod = ClickSendMethod.PostMessage;
                 ForcedMoveFocusTarget = false;
                 FollowRequireSourceForeground = false;
-                FollowMode = 1;
-                MouseMoveIntervalMs = 8;
+                FollowMode = 2;
+                MouseMoveIntervalMs = 4;
                 _lastWriteUtc = default;
                 return;
             }

@@ -51,9 +51,7 @@ internal sealed class MainForm : Form
 
     private const int HotkeyIdBindSource = 1;
     private const int HotkeyIdBindTarget = 2;
-    private const int HotkeyIdSwap = 3;
     private const int HotkeyIdStopFollow = 4;
-    private const int HotkeyIdMasterToggle = 5;
     private const int HotkeyIdMasterToggleChord = 6;
 
     internal MainForm(bool runAsTargetAgent, IntPtr? initialTargetHwnd)
@@ -63,6 +61,7 @@ internal sealed class MainForm : Form
         _hook = new GlobalHook(enableKeyboard: true);
 
         Text = "WinMirror Clicker";
+        TopMost = true;
         StartPosition = FormStartPosition.CenterScreen;
         var workingArea = Screen.PrimaryScreen?.WorkingArea ?? new Rectangle(0, 0, 1920, 1080);
         var maxWidth = Math.Max(420, workingArea.Width / 3);
@@ -85,7 +84,7 @@ internal sealed class MainForm : Form
 
         var title = new Label
         {
-            Text = "F9 绑定窗口1(源) / F10 绑定窗口2(目标)。在窗口1内左键点击后，将在延迟后把相对坐标点击发送到窗口2。",
+            Text = "D2R 跟随模式：F11 绑定第一个游戏窗口，F12 绑定第二个游戏窗口。Ctrl+Shift+E 启动/停止；启动后焦点回到窗口1，窗口1鼠标位置镜像到窗口2。",
             AutoSize = true,
             MaximumSize = new Size(maxWidth - 24, 0),
         };
@@ -249,18 +248,6 @@ internal sealed class MainForm : Form
         var ctrlDown = (NativeMethods.GetAsyncKeyState(NativeMethods.VK_CONTROL) & 0x8000) != 0;
         var shiftDown = (NativeMethods.GetAsyncKeyState(NativeMethods.VK_SHIFT) & 0x8000) != 0;
 
-        if (vkCode == NativeMethods.VK_F12 && allowToggle)
-        {
-            Interlocked.Exchange(ref _lastToggleTick, now);
-            BeginInvoke(new Action(() =>
-            {
-                Config.LoadIfChanged();
-                if (Config.FollowMode == 2) ToggleMode2HeldKey();
-                else ToggleFollow();
-            }));
-            return;
-        }
-
         if (ctrlDown && shiftDown)
         {
             if (vkCode == NativeMethods.VK_Z && allowToggle)
@@ -273,7 +260,12 @@ internal sealed class MainForm : Form
             if (vkCode == Config.ForcedMoveVk && allowToggle)
             {
                 Interlocked.Exchange(ref _lastToggleTick, now);
-                BeginInvoke(new Action(ToggleFollow));
+                BeginInvoke(new Action(() =>
+                {
+                    Config.LoadIfChanged();
+                    if (Config.FollowMode == 2) ToggleMode2HeldKey();
+                    else ToggleFollow();
+                }));
                 return;
             }
         }
@@ -284,8 +276,8 @@ internal sealed class MainForm : Form
             return;
         }
 
-        if (vkCode != NativeMethods.VK_F9 && vkCode != NativeMethods.VK_F10) return;
-        if (_runAsTargetAgent && vkCode == NativeMethods.VK_F9) return;
+        if (vkCode != NativeMethods.VK_F11 && vkCode != NativeMethods.VK_F12) return;
+        if (_runAsTargetAgent && vkCode == NativeMethods.VK_F11) return;
 
         now = Stopwatch.GetTimestamp();
         var last = Interlocked.Read(ref _lastBindTick);
@@ -299,8 +291,11 @@ internal sealed class MainForm : Form
         var hwnd = NativeMethods.GetForegroundWindow();
         BeginInvoke(new Action(() =>
         {
-            if (vkCode == NativeMethods.VK_F9) BindSource(hwnd);
-            else BindTarget(hwnd);
+            if (vkCode == NativeMethods.VK_F11) BindSource(hwnd);
+            else
+            {
+                BindTarget(hwnd);
+            }
         }));
     }
 
@@ -428,6 +423,7 @@ internal sealed class MainForm : Form
             {
                 if (Config.FollowMode == 2)
                 {
+                    if (!IsSourceForegroundClientPoint(source, pos)) continue;
                     await _mirror.MirrorMouseMovePostMessageAsync(source, target, pos).ConfigureAwait(false);
                 }
                 else if (Config.ForcedMoveEnabled)
@@ -602,24 +598,15 @@ internal sealed class MainForm : Form
             {
                 BindTargetFromForeground();
             }
-            else if (id == HotkeyIdSwap)
-            {
-                SwapSourceTarget();
-            }
             else if (id == HotkeyIdStopFollow)
             {
                 StopFollow();
             }
-            else if (id == HotkeyIdMasterToggle)
+            else if (id == HotkeyIdMasterToggleChord)
             {
                 Config.LoadIfChanged();
                 if (Config.FollowMode == 2) ToggleMode2HeldKey();
                 else ToggleFollow();
-            }
-            else if (id == HotkeyIdMasterToggleChord)
-            {
-                Config.LoadIfChanged();
-                if (Config.FollowMode != 2) ToggleFollow();
             }
         }
 
@@ -632,16 +619,14 @@ internal sealed class MainForm : Form
         if (!IsHandleCreated) return;
 
         Config.LoadIfChanged();
-        var okTarget = NativeMethods.RegisterHotKey(Handle, HotkeyIdBindTarget, NativeMethods.MOD_NOREPEAT, NativeMethods.VK_F10);
-        var okSource = _runAsTargetAgent || NativeMethods.RegisterHotKey(Handle, HotkeyIdBindSource, NativeMethods.MOD_NOREPEAT, NativeMethods.VK_F9);
-        var okSwap = NativeMethods.RegisterHotKey(Handle, HotkeyIdSwap, NativeMethods.MOD_NOREPEAT, NativeMethods.VK_F11);
+        var okTarget = NativeMethods.RegisterHotKey(Handle, HotkeyIdBindTarget, NativeMethods.MOD_NOREPEAT, NativeMethods.VK_F12);
+        var okSource = _runAsTargetAgent || NativeMethods.RegisterHotKey(Handle, HotkeyIdBindSource, NativeMethods.MOD_NOREPEAT, NativeMethods.VK_F11);
         var okStop = NativeMethods.RegisterHotKey(Handle, HotkeyIdStopFollow, NativeMethods.MOD_CONTROL | NativeMethods.MOD_SHIFT | NativeMethods.MOD_NOREPEAT, NativeMethods.VK_Z);
-        var okMaster = NativeMethods.RegisterHotKey(Handle, HotkeyIdMasterToggle, NativeMethods.MOD_NOREPEAT, NativeMethods.VK_F12);
         var okChord = NativeMethods.RegisterHotKey(Handle, HotkeyIdMasterToggleChord, NativeMethods.MOD_CONTROL | NativeMethods.MOD_SHIFT | NativeMethods.MOD_NOREPEAT, (uint)Config.ForcedMoveVk);
 
-        _hotkeysRegistered = okTarget && okSource && okSwap && okStop && okMaster && okChord;
+        _hotkeysRegistered = okTarget && okSource && okStop && okChord;
         var vkText = Config.ForcedMoveVk >= 'A' && Config.ForcedMoveVk <= 'Z' ? ((char)Config.ForcedMoveVk).ToString() : $"VK_{Config.ForcedMoveVk}";
-        AppendLog(_hotkeysRegistered ? $"已注册全局热键(F9/F10/F11 + F12开/关 + Ctrl+Shift+{vkText}开/关 + Ctrl+Shift+Z停止)。" : "注册全局热键失败（可能被其他程序占用）。");
+        AppendLog(_hotkeysRegistered ? $"已注册全局热键(F11绑定窗口1、F12绑定窗口2、Ctrl+Shift+{vkText}启动/停止、Ctrl+Shift+Z停止)。" : "注册全局热键失败（可能被其他程序占用）。");
     }
 
     private void UnregisterHotkeys()
@@ -651,9 +636,7 @@ internal sealed class MainForm : Form
 
         NativeMethods.UnregisterHotKey(Handle, HotkeyIdBindTarget);
         NativeMethods.UnregisterHotKey(Handle, HotkeyIdBindSource);
-        NativeMethods.UnregisterHotKey(Handle, HotkeyIdSwap);
         NativeMethods.UnregisterHotKey(Handle, HotkeyIdStopFollow);
-        NativeMethods.UnregisterHotKey(Handle, HotkeyIdMasterToggle);
         NativeMethods.UnregisterHotKey(Handle, HotkeyIdMasterToggleChord);
         _hotkeysRegistered = false;
     }
@@ -722,6 +705,53 @@ internal sealed class MainForm : Form
         _targetHwnd = hwnd;
         UpdateBindLabels();
         AppendLog($"已绑定窗口2(目标): {FormatWindow(hwnd)}");
+    }
+
+    private void StartDiabloFollowIfReady()
+    {
+        Config.LoadIfChanged();
+        if (_runAsTargetAgent) return;
+        if (_sourceHwnd == IntPtr.Zero || _targetHwnd == IntPtr.Zero) return;
+        if (_sourceHwnd == _targetHwnd) return;
+
+        _followEnabled = true;
+
+        if (Config.FollowMode == 2)
+        {
+            if (!_mode2HeldKeyDown)
+            {
+                _mode2HeldKeyDown = true;
+                MirrorService.PostKeyAsync(_targetHwnd, Config.ForcedMoveVk, true);
+                AppendLog($"已开始 D2R 跟随：窗口2按住 {FormatVk(Config.ForcedMoveVk)}，窗口1鼠标位置同步到窗口2。");
+            }
+        }
+        else if (Config.ForcedMoveEnabled)
+        {
+            _forcedMovePressed = true;
+            _ = MirrorService.SendForcedKeyAsync(_targetHwnd, Config.ForcedMoveVk, true, _sourceHwnd, _cts.Token);
+            AppendLog($"已开始 D2R 跟随：窗口2按住 {FormatVk(Config.ForcedMoveVk)}，窗口1鼠标移动会同步到窗口2。");
+        }
+
+        UpdateFollowUi();
+        NativeMethods.SetForegroundWindow(_sourceHwnd);
+        _moveSignal.Set();
+    }
+
+    private static bool IsSourceForegroundClientPoint(IntPtr source, Point screenPoint)
+    {
+        if (source == IntPtr.Zero) return false;
+        if (NativeMethods.GetForegroundWindow() != source) return false;
+        if (!MirrorService.TryGetClientPoint(source, screenPoint, out var clientPoint)) return false;
+        if (!NativeMethods.GetClientRect(source, out var rect)) return false;
+
+        var width = rect.right - rect.left;
+        var height = rect.bottom - rect.top;
+        return width > 0
+            && height > 0
+            && clientPoint.X >= 0
+            && clientPoint.Y >= 0
+            && clientPoint.X < width
+            && clientPoint.Y < height;
     }
 
     private void SpawnTargetAgentFromTargetWindow()
@@ -901,8 +931,8 @@ internal sealed class MainForm : Form
         _toggleFollowButton.Text = _followEnabled ? "跟随: 开" : "跟随: 关";
         _toggleFollowButton.BackColor = _followEnabled ? Color.DarkSeaGreen : SystemColors.Control;
         _followLabel.Text = Config.FollowMode == 2
-            ? $"模式2：F12 切换 {vkText} 按住/松开  热键:{hotkey}"
-            : $"跟随总开关: {follow}  {modeText}  (F12 / Ctrl+Shift+{vkText})  停止: Ctrl+Shift+Z  热键:{hotkey}";
+            ? $"模式2：F11绑定窗口1，F12绑定窗口2；Ctrl+Shift+{vkText} 启动/停止并切回窗口1  热键:{hotkey}"
+            : $"跟随总开关: {follow}  {modeText}  (Ctrl+Shift+{vkText})  停止: Ctrl+Shift+Z  热键:{hotkey}";
         _forcedMoveLabel.Text = Config.FollowMode == 2
             ? $"强制移动: {forced}  键:{vkText}  E(目标):{mode2Key}  源前台:{requireFg}  注入:PostMessage  Move间隔:忽略"
             : $"强制移动: {forced}  键:{vkText}  键状态:{pressed}  源前台:{requireFg}  注入:{fmMethod}";
@@ -914,18 +944,11 @@ internal sealed class MainForm : Form
         if (Config.FollowMode != 2) return;
         if (_mode2HeldKeyDown)
         {
-            ReleaseMode2HeldKey();
-            UpdateFollowUi();
+            StopFollow();
         }
         else
         {
-            var target = _targetHwnd;
-            if (target == IntPtr.Zero) return;
-            _mode2HeldKeyDown = true;
-            _followEnabled = true;
-            MirrorService.PostKeyAsync(target, Config.ForcedMoveVk, true);
-            AppendLog($"模式2：已按住 {FormatVk(Config.ForcedMoveVk)}。");
-            UpdateFollowUi();
+            StartDiabloFollowIfReady();
         }
     }
 
