@@ -11,9 +11,10 @@ internal static class NativeMethods
     internal const int WM_KEYUP = 0x0101;
 
     internal const uint VK_E = 0x45;
-    internal const uint VK_H = 0x48;
     internal const uint VK_Q = 0x51;
     internal const uint VK_S = 0x53;
+    internal const uint VK_P = 0x50;
+    internal const uint VK_SHIFT = 0x10;
     internal const uint VK_1 = 0x31;
     internal const uint VK_2 = 0x32;
     internal const uint VK_F11 = 0x7A;
@@ -34,6 +35,8 @@ internal static class NativeMethods
     internal const uint INPUT_MOUSE = 0;
     internal const uint INPUT_KEYBOARD = 1;
     internal const uint MOUSEEVENTF_MOVE = 0x0001;
+    internal const uint MOUSEEVENTF_LEFTDOWN = 0x0002;
+    internal const uint MOUSEEVENTF_LEFTUP = 0x0004;
     internal const uint MOUSEEVENTF_VIRTUALDESK = 0x4000;
     internal const uint MOUSEEVENTF_ABSOLUTE = 0x8000;
     internal const uint KEYEVENTF_KEYUP = 0x0002;
@@ -157,6 +160,9 @@ internal static class NativeMethods
 
     [DllImport("user32.dll", SetLastError = true)]
     internal static extern bool UnregisterHotKey(IntPtr hWnd, int id);
+
+    [DllImport("user32.dll")]
+    internal static extern short GetAsyncKeyState(int vKey);
 
     [DllImport("user32.dll", SetLastError = true)]
     internal static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint lpdwProcessId);

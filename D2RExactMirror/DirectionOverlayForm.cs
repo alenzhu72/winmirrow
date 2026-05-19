@@ -69,16 +69,24 @@ internal sealed class DirectionOverlayForm : Form
 
         e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
 
-        using var pen = new Pen(_color, 2)
+        using var pen = new Pen(_color, 6)
         {
-            EndCap = LineCap.ArrowAnchor,
+            CustomEndCap = new AdjustableArrowCap(8, 10, true),
             StartCap = LineCap.Round
         };
         using var dotBrush = new SolidBrush(_color);
-        using var glowPen = new Pen(Color.FromArgb(140, Color.Black), 4);
+        using var glowPen = new Pen(Color.FromArgb(170, Color.Black), 10)
+        {
+            CustomEndCap = new AdjustableArrowCap(9, 11, true),
+            StartCap = LineCap.Round
+        };
+        using var ringPen = new Pen(Color.FromArgb(220, Color.Black), 3);
 
         e.Graphics.DrawLine(glowPen, anchor, cursor);
         e.Graphics.DrawLine(pen, anchor, cursor);
-        e.Graphics.FillEllipse(dotBrush, anchor.X - 4, anchor.Y - 4, 8, 8);
+        e.Graphics.FillEllipse(dotBrush, anchor.X - 8, anchor.Y - 8, 16, 16);
+        e.Graphics.DrawEllipse(ringPen, anchor.X - 9, anchor.Y - 9, 18, 18);
+        e.Graphics.FillEllipse(dotBrush, cursor.X - 7, cursor.Y - 7, 14, 14);
+        e.Graphics.DrawEllipse(ringPen, cursor.X - 8, cursor.Y - 8, 16, 16);
     }
 }

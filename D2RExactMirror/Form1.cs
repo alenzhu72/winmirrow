@@ -5,7 +5,6 @@ namespace D2RExactMirror;
 
 public partial class Form1 : Form
 {
-    private const int MoveIntervalMs = 8;
     private const int HotkeyBindWindow1 = 101;
     private const int HotkeyBindWindow2 = 102;
     private const int HotkeyToggle = 103;
@@ -13,8 +12,8 @@ public partial class Form1 : Form
     private const int HotkeyCaptureWindow1Anchor = 105;
     private const int HotkeyCaptureWindow2Anchor = 106;
     private const int HotkeyEmergencyExit = 107;
-    private const int HotkeyForceTargetKey = 108;
     private const int HotkeySwapLeader = 109;
+    private const int HotkeyToggleTargetHold = 110;
 
     private readonly Label _window1Label = new() { AutoSize = true };
     private readonly Label _window2Label = new() { AutoSize = true };
@@ -27,8 +26,8 @@ public partial class Form1 : Form
     private readonly Button _coordinateModeButton = new() { AutoSize = true };
     private readonly Button _anchorModeButton = new() { AutoSize = true };
     private readonly Button _sendMethodButton = new() { AutoSize = true };
-    private readonly Button _forceKeyButton = new() { AutoSize = true };
     private readonly Button _swapButton = new() { AutoSize = true, Text = "切换带领" };
+    private readonly Button _targetHoldButton = new() { AutoSize = true };
     private readonly Button _toggleButton = new() { AutoSize = true, Text = "启动" };
     private readonly Button _stopButton = new() { AutoSize = true, Text = "强制停止" };
     private readonly TextBox _log = new()
@@ -38,7 +37,8 @@ public partial class Form1 : Form
         ScrollBars = ScrollBars.Vertical,
         Dock = DockStyle.Fill
     };
-    private readonly System.Windows.Forms.Timer _timer = new() { Interval = MoveIntervalMs };
+    private readonly MirrorConfig _config = new();
+    private readonly System.Windows.Forms.Timer _timer = new();
     private readonly DirectionOverlayForm _sourceOverlay = new(Color.Lime);
     private readonly DirectionOverlayForm _targetOverlay = new(Color.DeepSkyBlue);
 
@@ -46,21 +46,28 @@ public partial class Form1 : Form
     private IntPtr _window2;
     private bool _running;
     private bool _targetKeyDown;
-    private bool _forceTargetKeyDown;
     private bool _activeTargetKeyRequested;
+    private bool _targetShiftDown;
+    private bool _targetHoldPaused;
     private Point? _lastSent;
     private long _lastSendTick;
     private Point? _sourceAnchor;
     private Point? _targetAnchor;
-    private CoordinateMode _coordinateMode = CoordinateMode.LegacyAbsolute;
-    private AnchorMode _anchorMode = AnchorMode.Manual;
-    private MouseSendMethod _mouseSendMethod = MouseSendMethod.PostMessage;
+    private CoordinateMode _coordinateMode;
+    private AnchorMode _anchorMode;
+    private MouseSendMethod _mouseSendMethod;
 
     public Form1()
     {
         InitializeComponent();
+        _coordinateMode = _config.DefaultCoordinateMode;
+        _anchorMode = _config.DefaultAnchorMode;
+        _mouseSendMethod = _config.DefaultMouseSendMethod;
+        _timer.Interval = _config.SyncIntervalMs;
         BuildUi();
         _timer.Tick += (_, _) => MirrorOneTick();
+        Log($"已加载配置: {_config.ConfigPath}");
+        Log($"同步间隔={_config.SyncIntervalMs}ms，鼠标方式={_mouseSendMethod}。");
     }
 
     protected override void OnHandleCreated(EventArgs e)
@@ -105,11 +112,11 @@ public partial class Form1 : Form
                 case HotkeyEmergencyExit:
                     EmergencyExit();
                     break;
-                case HotkeyForceTargetKey:
-                    ToggleForceTargetKey();
-                    break;
                 case HotkeySwapLeader:
                     SwapLeaderFollower();
+                    break;
+                case HotkeyToggleTargetHold:
+                    ToggleTargetHoldPaused();
                     break;
             }
         }
@@ -121,52 +128,74 @@ public partial class Form1 : Form
     {
         Text = "D2R Exact Mirror";
         TopMost = true;
-        StartPosition = FormStartPosition.CenterScreen;
-        ClientSize = new Size(720, 360);
-        MinimumSize = new Size(560, 300);
+        StartPosition = FormStartPosition.Manual;
+        ClientSize = new Size(1280, 74);
+        MinimumSize = new Size(900, 64);
+        Font = new Font(Font.FontFamily, 8.5f);
 
         var root = new TableLayoutPanel
         {
             Dock = DockStyle.Fill,
-            ColumnCount = 1,
-            RowCount = 8,
-            Padding = new Padding(12)
+            ColumnCount = 2,
+            RowCount = 1,
+            Padding = new Padding(6)
         };
-        root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
-        root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
-        root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
-        root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
-        root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
-        root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
-        root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+        root.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 58));
+        root.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 42));
         root.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
 
-        root.Controls.Add(new Label
+        var leftPanel = new TableLayoutPanel
         {
-            AutoSize = true,
-            MaximumSize = new Size(680, 0),
-            Text = "D2R跟随：LegacyAbsolute会按旧项目方式把窗口1鼠标客户区坐标按比例映射到窗口2；DirectionAnchor会按人物点方向映射。"
-        }, 0, 0);
+            Dock = DockStyle.Fill,
+            ColumnCount = 1,
+            RowCount = 3
+        };
+        leftPanel.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+        leftPanel.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+        leftPanel.RowStyles.Add(new RowStyle(SizeType.AutoSize));
 
-        var buttons = new FlowLayoutPanel { AutoSize = true, Dock = DockStyle.Fill, WrapContents = true };
+        var buttons = new FlowLayoutPanel { AutoSize = true, Dock = DockStyle.Fill, WrapContents = false };
         buttons.Controls.Add(_autoBindButton);
         buttons.Controls.Add(_captureSourceAnchorButton);
         buttons.Controls.Add(_captureTargetAnchorButton);
         buttons.Controls.Add(_coordinateModeButton);
         buttons.Controls.Add(_anchorModeButton);
         buttons.Controls.Add(_sendMethodButton);
-        buttons.Controls.Add(_forceKeyButton);
         buttons.Controls.Add(_swapButton);
+        buttons.Controls.Add(_targetHoldButton);
         buttons.Controls.Add(_toggleButton);
         buttons.Controls.Add(_stopButton);
-        root.Controls.Add(buttons, 0, 1);
+        leftPanel.Controls.Add(buttons, 0, 0);
 
-        root.Controls.Add(MakeRow("窗口1:", _window1Label), 0, 2);
-        root.Controls.Add(MakeRow("窗口2:", _window2Label), 0, 3);
-        root.Controls.Add(MakeRow("状态:", _stateLabel), 0, 4);
-        root.Controls.Add(MakeRow("人物点:", _anchorLabel), 0, 5);
-        root.Controls.Add(MakeRow("坐标:", _coordLabel), 0, 6);
-        root.Controls.Add(_log, 0, 7);
+        var windows = new FlowLayoutPanel
+        {
+            AutoSize = true,
+            Dock = DockStyle.Fill,
+            FlowDirection = FlowDirection.LeftToRight,
+            WrapContents = false
+        };
+        windows.Controls.Add(MakeRow("窗1:", _window1Label, 390));
+        windows.Controls.Add(MakeRow("窗2:", _window2Label, 390));
+        leftPanel.Controls.Add(windows, 0, 1);
+        root.Controls.Add(leftPanel, 0, 0);
+
+        var rightStatus = new TableLayoutPanel
+        {
+            Dock = DockStyle.Fill,
+            ColumnCount = 2,
+            RowCount = 3
+        };
+        rightStatus.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 54));
+        rightStatus.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+        rightStatus.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+        rightStatus.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+        rightStatus.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+        AddStatusRow(rightStatus, 0, "状态:", _stateLabel);
+        AddStatusRow(rightStatus, 1, "人物:", _anchorLabel);
+        AddStatusRow(rightStatus, 2, "坐标:", _coordLabel);
+        root.Controls.Add(rightStatus, 1, 0);
+
+        _log.Visible = false;
         Controls.Add(root);
 
         _autoBindButton.Click += (_, _) => AutoBindDiabloWindows();
@@ -175,14 +204,20 @@ public partial class Form1 : Form
         _coordinateModeButton.Click += (_, _) => ToggleCoordinateMode();
         _anchorModeButton.Click += (_, _) => ToggleAnchorMode();
         _sendMethodButton.Click += (_, _) => ToggleSendMethod();
-        _forceKeyButton.Click += (_, _) => ToggleForceTargetKey();
         _swapButton.Click += (_, _) => SwapLeaderFollower();
+        _targetHoldButton.Click += (_, _) => ToggleTargetHoldPaused();
         _toggleButton.Click += (_, _) => ToggleMirror();
         _stopButton.Click += (_, _) => StopMirror();
         UpdateLabels();
     }
 
-    private static Control MakeRow(string name, Control value)
+    protected override void OnShown(EventArgs e)
+    {
+        base.OnShown(e);
+        PositionToolWindowBelowGames();
+    }
+
+    private static Control MakeRow(string name, Control value, int valueWidth)
     {
         var row = new FlowLayoutPanel
         {
@@ -193,13 +228,33 @@ public partial class Form1 : Form
         row.Controls.Add(new Label
         {
             Text = name,
-            Width = 64,
+            Width = 42,
             AutoSize = false,
             TextAlign = ContentAlignment.MiddleLeft,
             Margin = new Padding(0, 3, 8, 3)
         });
+        value.AutoSize = false;
+        value.Width = valueWidth;
+        value.Height = 20;
         row.Controls.Add(value);
         return row;
+    }
+
+    private static void AddStatusRow(TableLayoutPanel table, int rowIndex, string name, Label value)
+    {
+        table.Controls.Add(new Label
+        {
+            Text = name,
+            Dock = DockStyle.Fill,
+            TextAlign = ContentAlignment.MiddleRight,
+            Margin = new Padding(0, 1, 4, 1)
+        }, 0, rowIndex);
+
+        value.AutoSize = false;
+        value.Dock = DockStyle.Fill;
+        value.TextAlign = ContentAlignment.MiddleLeft;
+        value.Margin = new Padding(0, 1, 0, 1);
+        table.Controls.Add(value, 1, rowIndex);
     }
 
     private void RegisterHotkeys()
@@ -211,8 +266,8 @@ public partial class Form1 : Form
         var okAnchor1 = NativeMethods.RegisterHotKey(Handle, HotkeyCaptureWindow1Anchor, NativeMethods.MOD_CONTROL | NativeMethods.MOD_SHIFT | NativeMethods.MOD_NOREPEAT, NativeMethods.VK_1);
         var okAnchor2 = NativeMethods.RegisterHotKey(Handle, HotkeyCaptureWindow2Anchor, NativeMethods.MOD_CONTROL | NativeMethods.MOD_SHIFT | NativeMethods.MOD_NOREPEAT, NativeMethods.VK_2);
         var okEmergency = NativeMethods.RegisterHotKey(Handle, HotkeyEmergencyExit, NativeMethods.MOD_CONTROL | NativeMethods.MOD_SHIFT | NativeMethods.MOD_NOREPEAT, NativeMethods.VK_Q);
-        var okForceKey = NativeMethods.RegisterHotKey(Handle, HotkeyForceTargetKey, NativeMethods.MOD_CONTROL | NativeMethods.MOD_SHIFT | NativeMethods.MOD_NOREPEAT, NativeMethods.VK_H);
         var okSwap = NativeMethods.RegisterHotKey(Handle, HotkeySwapLeader, NativeMethods.MOD_CONTROL | NativeMethods.MOD_SHIFT | NativeMethods.MOD_NOREPEAT, NativeMethods.VK_S);
+        var okHold = NativeMethods.RegisterHotKey(Handle, HotkeyToggleTargetHold, NativeMethods.MOD_CONTROL | NativeMethods.MOD_SHIFT | NativeMethods.MOD_NOREPEAT, NativeMethods.VK_P);
         Log(ok1 ? "F11热键注册成功。" : "F11热键注册失败，可用自动绑定按钮。");
         Log(ok2 ? "F12热键注册成功。" : "F12热键注册失败，可用自动绑定按钮。");
         Log(okToggle ? "Ctrl+Shift+E热键注册成功。" : "Ctrl+Shift+E热键注册失败，可用启动/停止按钮。");
@@ -220,8 +275,8 @@ public partial class Form1 : Form
         Log(okAnchor1 ? "Ctrl+Shift+1热键注册成功。" : "Ctrl+Shift+1热键注册失败，可用记录窗口1人物点按钮。");
         Log(okAnchor2 ? "Ctrl+Shift+2热键注册成功。" : "Ctrl+Shift+2热键注册失败，可用记录窗口2人物点按钮。");
         Log(okEmergency ? "Ctrl+Shift+Q强制结束热键注册成功。" : "Ctrl+Shift+Q强制结束热键注册失败。");
-        Log(okForceKey ? "Ctrl+Shift+H强制按住/释放跟随窗口E热键注册成功。" : "Ctrl+Shift+H热键注册失败，可用强制E按钮。");
         Log(okSwap ? "Ctrl+Shift+S切换带领窗口热键注册成功。" : "Ctrl+Shift+S热键注册失败，可用切换带领按钮。");
+        Log(okHold ? "Ctrl+Shift+P窗口2原地/跟随热键注册成功。" : "Ctrl+Shift+P热键注册失败，可用原地按钮。");
     }
 
     private void UnregisterHotkeys()
@@ -233,8 +288,8 @@ public partial class Form1 : Form
         NativeMethods.UnregisterHotKey(Handle, HotkeyCaptureWindow1Anchor);
         NativeMethods.UnregisterHotKey(Handle, HotkeyCaptureWindow2Anchor);
         NativeMethods.UnregisterHotKey(Handle, HotkeyEmergencyExit);
-        NativeMethods.UnregisterHotKey(Handle, HotkeyForceTargetKey);
         NativeMethods.UnregisterHotKey(Handle, HotkeySwapLeader);
+        NativeMethods.UnregisterHotKey(Handle, HotkeyToggleTargetHold);
     }
 
     private void BindWindow1()
@@ -250,6 +305,7 @@ public partial class Form1 : Form
         _window1 = hwnd;
         Log("已绑定窗口1: " + FormatWindow(hwnd));
         UpdateLabels();
+        PositionToolWindowBelowGames();
     }
 
     private void BindWindow2()
@@ -265,6 +321,7 @@ public partial class Form1 : Form
         _window2 = hwnd;
         Log("已绑定窗口2: " + FormatWindow(hwnd));
         UpdateLabels();
+        PositionToolWindowBelowGames();
     }
 
     private bool CanBind(IntPtr hwnd, string name)
@@ -305,6 +362,7 @@ public partial class Form1 : Form
         Log("自动绑定窗口1: " + FormatWindow(_window1));
         Log("自动绑定窗口2: " + FormatWindow(_window2));
         UpdateLabels();
+        PositionToolWindowBelowGames();
     }
 
     private static List<WindowCandidate> FindDiabloWindows()
@@ -369,11 +427,19 @@ public partial class Form1 : Form
         UpdateLabels();
     }
 
-    private void ToggleForceTargetKey()
+    private void ToggleTargetHoldPaused()
     {
-        _forceTargetKeyDown = !_forceTargetKeyDown;
-        ApplyTargetKeyState();
-        Log(_forceTargetKeyDown ? "已强制按住跟随窗口 E。" : "已取消强制按住跟随窗口 E。");
+        _targetHoldPaused = !_targetHoldPaused;
+        if (_targetHoldPaused)
+        {
+            ReleaseTargetInputs();
+            Log("窗口2已原地：释放 E，不再自动跟随。");
+        }
+        else
+        {
+            Log("窗口2恢复跟随：有有效鼠标方向时自动按住 E。");
+        }
+
         UpdateLabels();
     }
 
@@ -393,6 +459,37 @@ public partial class Form1 : Form
         ApplyTargetKeyState();
         Log("已切换带领窗口：当前窗口1为带领者，当前窗口2为跟随者，E发给当前窗口2。");
         UpdateLabels();
+        PositionToolWindowBelowGames();
+    }
+
+    private void PositionToolWindowBelowGames()
+    {
+        if (!NativeMethods.IsWindow(_window1) || !NativeMethods.IsWindow(_window2))
+        {
+            var primaryArea = Screen.PrimaryScreen?.WorkingArea ?? Screen.GetWorkingArea(this);
+            Width = primaryArea.Width;
+            Height = MinimumSize.Height;
+            Location = new Point(
+                primaryArea.Left,
+                primaryArea.Top);
+            return;
+        }
+
+        if (!NativeMethods.GetWindowRect(_window1, out var r1) ||
+            !NativeMethods.GetWindowRect(_window2, out var r2))
+        {
+            return;
+        }
+
+        var unionLeft = Math.Min(r1.Left, r2.Left);
+        var unionRight = Math.Max(r1.Right, r2.Right);
+        var unionTop = Math.Min(r1.Top, r2.Top);
+        var gameBounds = Rectangle.FromLTRB(unionLeft, unionTop, unionRight, Math.Max(r1.Bottom, r2.Bottom));
+        var area = Screen.FromRectangle(gameBounds).WorkingArea;
+
+        Width = area.Width;
+        Height = Math.Min(78, Math.Max(MinimumSize.Height, Math.Max(0, unionTop - area.Top)));
+        Location = new Point(area.Left, area.Top);
     }
 
     private void StartMirror()
@@ -422,6 +519,7 @@ public partial class Form1 : Form
         _lastSent = null;
         _lastSendTick = 0;
         RequestTargetKey(false);
+        SetTargetShift(false);
         _timer.Start();
         Log("已启动：等待窗口1有效鼠标方向。");
         UpdateLabels();
@@ -469,11 +567,11 @@ public partial class Form1 : Form
         try
         {
             _timer.Stop();
-            _forceTargetKeyDown = false;
             _activeTargetKeyRequested = false;
             if (NativeMethods.IsWindow(_window2))
             {
                 SetTargetKey(false);
+                SetTargetShift(false);
             }
         }
         finally
@@ -529,17 +627,17 @@ public partial class Form1 : Form
     {
         _timer.Stop();
         HideOverlays();
-        _forceTargetKeyDown = false;
         _activeTargetKeyRequested = false;
         if (_running && NativeMethods.IsWindow(_window2))
         {
             SetTargetKey(false);
+            SetTargetShift(false);
         }
 
         _running = false;
         _lastSent = null;
         _lastSendTick = 0;
-        Log("已停止：窗口2释放 E。");
+        Log("已停止：窗口2释放 E 和 Shift。");
         UpdateLabels();
     }
 
@@ -556,13 +654,15 @@ public partial class Form1 : Form
         {
             _coordLabel.Text = "窗口1不是焦点，不发送";
             HideOverlays();
-            RequestTargetKey(false);
+            ReleaseTargetInputs();
             return;
         }
 
+        var sourceShiftDown = IsShiftDown();
+
         if (!NativeMethods.GetCursorPos(out var screenPoint))
         {
-            RequestTargetKey(false);
+            ReleaseTargetInputs();
             return;
         }
 
@@ -570,21 +670,21 @@ public partial class Form1 : Form
         {
             _coordLabel.Text = "鼠标不在窗口1可见区域，不发送";
             HideOverlays();
-            RequestTargetKey(false);
+            ReleaseTargetInputs();
             return;
         }
 
         var clientPoint = screenPoint;
         if (!NativeMethods.ScreenToClient(_window1, ref clientPoint))
         {
-            RequestTargetKey(false);
+            ReleaseTargetInputs();
             return;
         }
 
         if (!NativeMethods.GetClientRect(_window1, out var sourceRect) ||
             !NativeMethods.GetClientRect(_window2, out var targetRect))
         {
-            RequestTargetKey(false);
+            ReleaseTargetInputs();
             return;
         }
 
@@ -594,7 +694,7 @@ public partial class Form1 : Form
         var targetH = targetRect.Bottom - targetRect.Top;
         if (sourceW <= 0 || sourceH <= 0 || targetW <= 0 || targetH <= 0)
         {
-            RequestTargetKey(false);
+            ReleaseTargetInputs();
             return;
         }
 
@@ -603,7 +703,7 @@ public partial class Form1 : Form
         if (x < 0 || y < 0 || x >= sourceW || y >= sourceH)
         {
             _coordLabel.Text = $"窗口1外: ({x}, {y})";
-            RequestTargetKey(false);
+            ReleaseTargetInputs();
             return;
         }
 
@@ -624,7 +724,7 @@ public partial class Form1 : Form
             EnsureAnchorsForCurrentMode();
             if (_sourceAnchor is null || _targetAnchor is null)
             {
-                RequestTargetKey(false);
+                ReleaseTargetInputs();
                 return;
             }
 
@@ -635,12 +735,14 @@ public partial class Form1 : Form
 
         var point = new Point(targetX, targetY);
         var now = Environment.TickCount64;
-        var resendMs = _mouseSendMethod == MouseSendMethod.FocusCursorPulse ? 180 : 80;
+        var resendMs = _mouseSendMethod == MouseSendMethod.FocusCursorPulse
+            ? _config.FocusCursorPulseIntervalMs
+            : _config.MouseResendIntervalMs;
         if (_lastSent == point && now - _lastSendTick < resendMs)
         {
             if (_mouseSendMethod != MouseSendMethod.FocusCursorPulse)
             {
-                RequestTargetKey(true);
+                ApplyTargetMovementKeys(sourceShiftDown);
             }
             return;
         }
@@ -649,9 +751,9 @@ public partial class Form1 : Form
 
         var lParam = NativeMethods.MakeLParam(targetX, targetY);
         SendTargetMouseMove(targetX, targetY, lParam);
-        if (_mouseSendMethod != MouseSendMethod.FocusMessage && _mouseSendMethod != MouseSendMethod.FocusCursorPulse)
+        if (_mouseSendMethod != MouseSendMethod.FocusCursorPulse)
         {
-            RequestTargetKey(true);
+            ApplyTargetMovementKeys(sourceShiftDown);
         }
         var sourceOverlayAnchor = _coordinateMode == CoordinateMode.LegacyAbsolute ? new Point(x, y) : _sourceAnchor;
         var targetOverlayAnchor = _coordinateMode == CoordinateMode.LegacyAbsolute ? new Point(targetX, targetY) : _targetAnchor;
@@ -700,15 +802,21 @@ public partial class Form1 : Form
     private void SendFocusedMouseMoveMessage(IntPtr lParam)
     {
         var previous = NativeMethods.GetForegroundWindow();
-        NativeMethods.SetForegroundWindow(_window2);
-        Thread.Sleep(1);
-        SendMouseMoveMessage(lParam);
-        PostTargetKey(true);
-        _targetKeyDown = true;
-
-        if (previous != IntPtr.Zero && previous != _window2 && NativeMethods.IsWindow(previous))
+        if (_config.ActivateTargetForFocusMessage)
         {
-            Thread.Sleep(1);
+            NativeMethods.SetForegroundWindow(_window2);
+            SleepIfNeeded(_config.TargetFocusSettleMs);
+        }
+
+        SendMouseMoveMessage(lParam);
+
+        if (_config.ActivateTargetForFocusMessage &&
+            _config.RestoreFocusAfterFocusMessage &&
+            previous != IntPtr.Zero &&
+            previous != _window2 &&
+            NativeMethods.IsWindow(previous))
+        {
+            SleepIfNeeded(_config.TargetFocusSettleMs);
             NativeMethods.SetForegroundWindow(previous);
         }
     }
@@ -722,21 +830,33 @@ public partial class Form1 : Form
 
         var previous = NativeMethods.GetForegroundWindow();
         NativeMethods.SetForegroundWindow(_window2);
-        Thread.Sleep(2);
+        SleepIfNeeded(_config.TargetFocusSettleMs);
         SendAbsoluteMouseMove(targetPoint.X, targetPoint.Y);
-        Thread.Sleep(2);
+        SleepIfNeeded(_config.TargetFocusSettleMs);
+        if (_config.ClickTargetOnFocusPulse)
+        {
+            SendMouseClick();
+            SleepIfNeeded(_config.TargetFocusSettleMs);
+        }
+
         SendInputKey(NativeMethods.VK_E, down: true);
-        Thread.Sleep(25);
+        SleepIfNeeded(_config.KeyPulseHoldMs);
         SendInputKey(NativeMethods.VK_E, down: false);
         _targetKeyDown = false;
 
-        if (previous != IntPtr.Zero && previous != _window2 && NativeMethods.IsWindow(previous))
+        if (_config.RestoreFocusAfterFocusPulse &&
+            previous != IntPtr.Zero &&
+            previous != _window2 &&
+            NativeMethods.IsWindow(previous))
         {
             NativeMethods.SetForegroundWindow(previous);
-            Thread.Sleep(1);
+            SleepIfNeeded(_config.TargetFocusSettleMs);
         }
 
-        SendAbsoluteMouseMove(originalCursor.X, originalCursor.Y);
+        if (_config.RestoreCursorAfterFocusPulse)
+        {
+            SendAbsoluteMouseMove(originalCursor.X, originalCursor.Y);
+        }
     }
 
     private static void SendAbsoluteMouseMove(int screenX, int screenY)
@@ -765,6 +885,33 @@ public partial class Form1 : Form
         NativeMethods.SendInput(1, new[] { input }, System.Runtime.InteropServices.Marshal.SizeOf<NativeMethods.INPUT>());
     }
 
+    private static void SendMouseClick()
+    {
+        var down = new NativeMethods.INPUT
+        {
+            type = NativeMethods.INPUT_MOUSE,
+            U = new NativeMethods.InputUnion
+            {
+                mi = new NativeMethods.MOUSEINPUT
+                {
+                    dwFlags = NativeMethods.MOUSEEVENTF_LEFTDOWN
+                }
+            }
+        };
+        var up = new NativeMethods.INPUT
+        {
+            type = NativeMethods.INPUT_MOUSE,
+            U = new NativeMethods.InputUnion
+            {
+                mi = new NativeMethods.MOUSEINPUT
+                {
+                    dwFlags = NativeMethods.MOUSEEVENTF_LEFTUP
+                }
+            }
+        };
+        NativeMethods.SendInput(2, new[] { down, up }, System.Runtime.InteropServices.Marshal.SizeOf<NativeMethods.INPUT>());
+    }
+
     private static void SendInputKey(uint vk, bool down)
     {
         var input = new NativeMethods.INPUT
@@ -782,6 +929,14 @@ public partial class Form1 : Form
         NativeMethods.SendInput(1, new[] { input }, System.Runtime.InteropServices.Marshal.SizeOf<NativeMethods.INPUT>());
     }
 
+    private static void SleepIfNeeded(int milliseconds)
+    {
+        if (milliseconds > 0)
+        {
+            Thread.Sleep(milliseconds);
+        }
+    }
+
     private void RequestTargetKey(bool down)
     {
         _activeTargetKeyRequested = down;
@@ -791,13 +946,12 @@ public partial class Form1 : Form
     private void SetTargetKey(bool down)
     {
         _activeTargetKeyRequested = down;
-        _forceTargetKeyDown = false;
         ApplyTargetKeyState();
     }
 
     private void ApplyTargetKeyState()
     {
-        var desired = _activeTargetKeyRequested || _forceTargetKeyDown;
+        var desired = _activeTargetKeyRequested && !_targetShiftDown && !_targetHoldPaused;
         if (_targetKeyDown == desired) return;
         _targetKeyDown = desired;
         PostTargetKey(desired);
@@ -807,6 +961,48 @@ public partial class Form1 : Form
     private void PostTargetKey(bool down)
     {
         NativeMethods.PostMessage(_window2, down ? NativeMethods.WM_KEYDOWN : NativeMethods.WM_KEYUP, (IntPtr)NativeMethods.VK_E, IntPtr.Zero);
+    }
+
+    private void ApplyTargetMovementKeys(bool sourceShiftDown)
+    {
+        if (_targetHoldPaused)
+        {
+            if (_targetKeyDown || _targetShiftDown || _activeTargetKeyRequested)
+            {
+                ReleaseTargetInputs();
+            }
+            return;
+        }
+
+        if (sourceShiftDown)
+        {
+            RequestTargetKey(false);
+            SetTargetShift(true);
+            return;
+        }
+
+        SetTargetShift(false);
+        RequestTargetKey(true);
+    }
+
+    private void ReleaseTargetInputs()
+    {
+        RequestTargetKey(false);
+        SetTargetShift(false);
+    }
+
+    private void SetTargetShift(bool down)
+    {
+        if (_targetShiftDown == down) return;
+        _targetShiftDown = down;
+        NativeMethods.PostMessage(_window2, down ? NativeMethods.WM_KEYDOWN : NativeMethods.WM_KEYUP, (IntPtr)NativeMethods.VK_SHIFT, IntPtr.Zero);
+        ApplyTargetKeyState();
+        UpdateLabels();
+    }
+
+    private static bool IsShiftDown()
+    {
+        return (NativeMethods.GetAsyncKeyState((int)NativeMethods.VK_SHIFT) & 0x8000) != 0;
     }
 
     private static bool IsPointVisiblyOnWindow(IntPtr expectedWindow, NativeMethods.POINT screenPoint)
@@ -834,13 +1030,15 @@ public partial class Form1 : Form
     {
         _window1Label.Text = _window1 == IntPtr.Zero ? "未绑定" : $"带领者  {FormatWindow(_window1)}";
         _window2Label.Text = _window2 == IntPtr.Zero ? "未绑定" : $"跟随者/E目标  {FormatWindow(_window2)}";
-        var eMode = _forceTargetKeyDown ? "强制按下" : (_targetKeyDown ? "按下" : "松开");
-        _stateLabel.Text = _running ? $"运行中，跟随者E={eMode}，鼠标={_mouseSendMethod}" : $"停止，跟随者E={eMode}，鼠标={_mouseSendMethod}";
-        _anchorLabel.Text = $"坐标={_coordinateMode}  人物点={_anchorMode}  窗口1={FormatPoint(_sourceAnchor)}  窗口2={FormatPoint(_targetAnchor)}";
+        var eMode = _targetKeyDown ? "按下" : "松开";
+        var shiftMode = _targetShiftDown ? "按下" : "松开";
+        var holdMode = _targetHoldPaused ? "原地" : "跟随";
+        _stateLabel.Text = $"{(_running ? "运行" : "停止")}  窗口2={holdMode}  E={eMode}  Shift={shiftMode}  鼠标={_mouseSendMethod}";
+        _anchorLabel.Text = $"坐标={_coordinateMode}  人物={_anchorMode}  窗1={FormatPoint(_sourceAnchor)}  窗2={FormatPoint(_targetAnchor)}";
         _coordinateModeButton.Text = $"坐标:{_coordinateMode}";
         _anchorModeButton.Text = $"人物点:{_anchorMode}";
         _sendMethodButton.Text = $"鼠标:{_mouseSendMethod}";
-        _forceKeyButton.Text = _forceTargetKeyDown ? "取消强制E" : "强制E";
+        _targetHoldButton.Text = _targetHoldPaused ? "窗口2:原地" : "窗口2:跟随";
         _toggleButton.Text = _running ? "停止" : "启动";
     }
 
@@ -867,24 +1065,5 @@ public partial class Form1 : Form
 
     private sealed record WindowCandidate(IntPtr Handle, string Title, int Left, int Top);
 
-    private enum CoordinateMode
-    {
-        LegacyAbsolute,
-        DirectionAnchor
-    }
-
-    private enum MouseSendMethod
-    {
-        PostMessage,
-        SendMessage,
-        FocusMessage,
-        FocusCursorPulse
-    }
-
-    private enum AnchorMode
-    {
-        DynamicPlayCenter,
-        Manual
-    }
 }
 

@@ -1,0 +1,66 @@
+# D2R Exact Mirror config
+# 修改后重启程序生效。格式为 Key=Value，# 后面是注释。
+
+# 同步时间，单位毫秒。100 表示每 100ms 同步一次窗口2鼠标/E输入。
+SyncIntervalMs=100
+
+# 同一个蓝点坐标重复发送的最小间隔，单位毫秒。
+MouseResendIntervalMs=100
+
+# FocusCursorPulse 模式下重复激活窗口2/移动真实鼠标/按E的间隔，单位毫秒。
+FocusCursorPulseIntervalMs=100
+
+# 激活窗口2后等待多久再发送鼠标和E，单位毫秒。游戏吃不到输入时可调大到 20-50。
+TargetFocusSettleMs=10
+
+# FocusCursorPulse 每次按住 E 的时间，单位毫秒。人物移动断续时可调大到 50-100。
+KeyPulseHoldMs=35
+
+# true: FocusMessage 模式下先激活窗口2，再发送蓝点鼠标位置和 E。不会移动真实鼠标。
+ActivateTargetForFocusMessage=true
+
+# true: FocusMessage 每次发送后把焦点切回窗口1，方便继续用窗口1控制方向。
+RestoreFocusAfterFocusMessage=true
+
+# true: FocusCursorPulse 每次把鼠标移到蓝点后点击一下窗口2，用于解决窗口2未激活时人物按绿色鼠标方向移动的问题。
+ClickTargetOnFocusPulse=true
+
+# true: 每次脉冲后把焦点切回窗口1，方便继续用窗口1鼠标控制方向。
+RestoreFocusAfterFocusPulse=true
+
+# true: 每次脉冲后把真实鼠标移回原位置。若游戏必须持续读取窗口2真实鼠标点，可改为 false 试试。
+RestoreCursorAfterFocusPulse=true
+
+# 默认坐标模式：LegacyAbsolute 或 DirectionAnchor
+DefaultCoordinateMode=LegacyAbsolute
+
+# 默认人物点模式：Manual 或 DynamicPlayCenter
+DefaultAnchorMode=Manual
+
+# 默认鼠标发送方式：PostMessage、SendMessage、FocusMessage、FocusCursorPulse
+# 你的情况建议 FocusMessage：它会短暂激活窗口2并发送蓝点鼠标位置，但不会移动真实鼠标。
+# 注意：如果 D2R 按 E 时读取的是全局真实鼠标位置，FocusMessage 只能让蓝点/箭头正确，人物仍可能按真实鼠标方向移动。
+# 这种游戏行为下，只有 FocusCursorPulse 这类会移动真实鼠标的方式能影响人物方向。
+DefaultMouseSendMethod=FocusMessage
+
+# 热键说明：
+# F11：绑定当前前台窗口为窗口1/带领者
+# F12：绑定当前前台窗口为窗口2/跟随者/E目标
+# Ctrl+Shift+E：启动/停止镜像
+# Ctrl+Shift+Z：停止镜像并释放窗口2的 E
+# Ctrl+Shift+Q：强制结束程序，退出前释放窗口2的 E
+# Ctrl+Shift+1：记录窗口1人物点
+# Ctrl+Shift+2：记录窗口2人物点
+# Ctrl+Shift+S：交换带领者和跟随者
+# Ctrl+Shift+P：窗口2原地/恢复跟随。原地时窗口2释放 E，不自动移动，适合放安全位置吃经验。
+# Shift：窗口1站住时，同步让窗口2释放 E 并按住 Shift；松开 Shift 后窗口2恢复按住 E
+
+# 界面按钮说明：
+# 自动绑定D2R窗口：查找标题包含 Diablo II: Resurrected 的两个可见窗口，左边为窗口1，右边为窗口2。
+# 坐标:LegacyAbsolute/DirectionAnchor：切换绝对坐标映射或按人物点方向映射。
+# 人物点:Manual/DynamicPlayCenter：切换手动人物点或按窗口尺寸自动估算人物点。
+# 鼠标:PostMessage/SendMessage/FocusMessage/FocusCursorPulse：切换鼠标发送方式。
+# 切换带领：窗口1和窗口2互换。
+# 窗口2:跟随/原地：切换窗口2是否自动按住 E 跟随。
+# 启动/停止：开始或停止镜像。
+# 强制停止：停止镜像并释放窗口2的 E。
