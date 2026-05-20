@@ -123,6 +123,27 @@ public partial class Form1 : Form
         }
 
         base.WndProc(ref m);
+
+        if (m.Msg == NativeMethods.WM_NCHITTEST && m.Result == (IntPtr)NativeMethods.HTCLIENT)
+        {
+            const int resizeGrip = 8;
+            var x = unchecked((short)((long)m.LParam & 0xFFFF));
+            var y = unchecked((short)(((long)m.LParam >> 16) & 0xFFFF));
+            var client = PointToClient(new Point(x, y));
+            var left = client.X <= resizeGrip;
+            var right = client.X >= ClientSize.Width - resizeGrip;
+            var top = client.Y <= resizeGrip;
+            var bottom = client.Y >= ClientSize.Height - resizeGrip;
+
+            if (top && left) m.Result = (IntPtr)NativeMethods.HTTOPLEFT;
+            else if (top && right) m.Result = (IntPtr)NativeMethods.HTTOPRIGHT;
+            else if (bottom && left) m.Result = (IntPtr)NativeMethods.HTBOTTOMLEFT;
+            else if (bottom && right) m.Result = (IntPtr)NativeMethods.HTBOTTOMRIGHT;
+            else if (left) m.Result = (IntPtr)NativeMethods.HTLEFT;
+            else if (right) m.Result = (IntPtr)NativeMethods.HTRIGHT;
+            else if (top) m.Result = (IntPtr)NativeMethods.HTTOP;
+            else if (bottom) m.Result = (IntPtr)NativeMethods.HTBOTTOM;
+        }
     }
 
     private void BuildUi()
@@ -163,6 +184,7 @@ public partial class Form1 : Form
         leftPanel.RowStyles.Add(new RowStyle(SizeType.AutoSize));
 
         StyleCommandButton(_autoBindButton);
+        StyleCommandButton(_swapButton);
         StyleCommandButton(_targetHoldButton);
         StyleCommandButton(_toggleButton);
         StyleCommandButton(_stopButton);
@@ -175,6 +197,7 @@ public partial class Form1 : Form
             BackColor = Color.Transparent
         };
         buttons.Controls.Add(_autoBindButton);
+        buttons.Controls.Add(_swapButton);
         buttons.Controls.Add(_targetHoldButton);
         buttons.Controls.Add(_toggleButton);
         buttons.Controls.Add(_stopButton);

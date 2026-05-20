@@ -7,11 +7,21 @@ internal static class NativeMethods
 {
     internal const int WM_HOTKEY = 0x0312;
     internal const int WM_NCLBUTTONDOWN = 0x00A1;
+    internal const int WM_NCHITTEST = 0x0084;
     internal const int WM_MOUSEMOVE = 0x0200;
     internal const int WM_KEYDOWN = 0x0100;
     internal const int WM_KEYUP = 0x0101;
 
     internal const int HTCAPTION = 0x0002;
+    internal const int HTCLIENT = 0x0001;
+    internal const int HTLEFT = 0x000A;
+    internal const int HTRIGHT = 0x000B;
+    internal const int HTTOP = 0x000C;
+    internal const int HTTOPLEFT = 0x000D;
+    internal const int HTTOPRIGHT = 0x000E;
+    internal const int HTBOTTOM = 0x000F;
+    internal const int HTBOTTOMLEFT = 0x0010;
+    internal const int HTBOTTOMRIGHT = 0x0011;
 
     internal const uint VK_E = 0x45;
     internal const uint VK_Q = 0x51;
