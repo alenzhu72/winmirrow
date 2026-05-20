@@ -175,7 +175,7 @@ DefaultMouseSendMethod=PostMessage
 # Ctrl+Shift+1：记录窗口1人物点
 # Ctrl+Shift+2：记录窗口2人物点
 # Ctrl+Shift+S：交换带领者和跟随者
-# Ctrl+Shift+P：窗口2停止/恢复跟随。停止时窗口2释放 E，不自动移动，适合放安全位置吃经验。
+# Ctrl+Shift+A：窗口2停止/恢复跟随。停止时窗口2释放 E，不自动移动，适合放安全位置吃经验。
 # Shift：窗口1站住时，同步让窗口2释放 E 并按住 Shift；松开 Shift 后窗口2恢复按住 E
 
 # 界面按钮说明：

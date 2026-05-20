@@ -215,7 +215,7 @@ public partial class Form1 : Form
         windows.Controls.Add(MakeRow("窗2:", _window2Label, 330));
         leftPanel.Controls.Add(windows, 0, 1);
 
-        _hotkeyLabel.Text = "快捷键: F11窗1  F12窗2  Ctrl+Shift+1/2人物点  Ctrl+Shift+E启动/停止  Ctrl+Shift+P窗口2跟随/停止  Ctrl+Shift+S切换  Shift站立  Ctrl+Shift+Z停止  Ctrl+Shift+Q退出";
+        _hotkeyLabel.Text = "快捷键: F11窗1  F12窗2  Ctrl+Shift+1/2人物点  Ctrl+Shift+E启动/停止  Ctrl+Shift+A窗口2跟随/停止  Ctrl+Shift+S切换  Shift站立  Ctrl+Shift+Z停止  Ctrl+Shift+Q退出";
         _hotkeyLabel.ForeColor = Color.White;
         _hotkeyLabel.AutoSize = false;
         _hotkeyLabel.Dock = DockStyle.Fill;
@@ -357,7 +357,7 @@ public partial class Form1 : Form
         var okAnchor2 = NativeMethods.RegisterHotKey(Handle, HotkeyCaptureWindow2Anchor, NativeMethods.MOD_CONTROL | NativeMethods.MOD_SHIFT | NativeMethods.MOD_NOREPEAT, NativeMethods.VK_2);
         var okEmergency = NativeMethods.RegisterHotKey(Handle, HotkeyEmergencyExit, NativeMethods.MOD_CONTROL | NativeMethods.MOD_SHIFT | NativeMethods.MOD_NOREPEAT, NativeMethods.VK_Q);
         var okSwap = NativeMethods.RegisterHotKey(Handle, HotkeySwapLeader, NativeMethods.MOD_CONTROL | NativeMethods.MOD_SHIFT | NativeMethods.MOD_NOREPEAT, NativeMethods.VK_S);
-        var okHold = NativeMethods.RegisterHotKey(Handle, HotkeyToggleTargetHold, NativeMethods.MOD_CONTROL | NativeMethods.MOD_SHIFT | NativeMethods.MOD_NOREPEAT, NativeMethods.VK_P);
+        var okHold = NativeMethods.RegisterHotKey(Handle, HotkeyToggleTargetHold, NativeMethods.MOD_CONTROL | NativeMethods.MOD_SHIFT | NativeMethods.MOD_NOREPEAT, NativeMethods.VK_A);
         Log(ok1 ? "F11热键注册成功。" : "F11热键注册失败，可用自动绑定按钮。");
         Log(ok2 ? "F12热键注册成功。" : "F12热键注册失败，可用自动绑定按钮。");
         Log(okToggle ? "Ctrl+Shift+E热键注册成功。" : "Ctrl+Shift+E热键注册失败，可用启动/停止按钮。");
@@ -366,7 +366,7 @@ public partial class Form1 : Form
         Log(okAnchor2 ? "Ctrl+Shift+2热键注册成功。" : "Ctrl+Shift+2热键注册失败，可用记录窗口2人物点按钮。");
         Log(okEmergency ? "Ctrl+Shift+Q强制结束热键注册成功。" : "Ctrl+Shift+Q强制结束热键注册失败。");
         Log(okSwap ? "Ctrl+Shift+S切换带领窗口热键注册成功。" : "Ctrl+Shift+S热键注册失败，可用切换带领按钮。");
-        Log(okHold ? "Ctrl+Shift+P窗口2停止/跟随热键注册成功。" : "Ctrl+Shift+P热键注册失败，可用窗口2按钮。");
+        Log(okHold ? "Ctrl+Shift+A窗口2停止/跟随热键注册成功。" : "Ctrl+Shift+A热键注册失败，可用窗口2按钮。");
     }
 
     private void UnregisterHotkeys()
