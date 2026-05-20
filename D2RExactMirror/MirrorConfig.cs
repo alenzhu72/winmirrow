@@ -17,7 +17,7 @@ internal sealed class MirrorConfig
     public bool RestoreCursorAfterFocusPulse { get; private set; } = true;
     public CoordinateMode DefaultCoordinateMode { get; private set; } = CoordinateMode.LegacyAbsolute;
     public AnchorMode DefaultAnchorMode { get; private set; } = AnchorMode.Manual;
-    public MouseSendMethod DefaultMouseSendMethod { get; private set; } = MouseSendMethod.FocusMessage;
+    public MouseSendMethod DefaultMouseSendMethod { get; private set; } = MouseSendMethod.PostMessage;
 
     public string ConfigPath { get; }
 
@@ -161,10 +161,10 @@ DefaultCoordinateMode=LegacyAbsolute
 DefaultAnchorMode=Manual
 
 # 默认鼠标发送方式：PostMessage、SendMessage、FocusMessage、FocusCursorPulse
-# 你的情况建议 FocusMessage：它会短暂激活窗口2并发送蓝点鼠标位置，但不会移动真实鼠标。
+# 两个 D2R 窗口重叠、大小相同时建议 PostMessage：不切焦点，界面更稳，人物方向依赖真实鼠标重叠位置。
 # 注意：如果 D2R 按 E 时读取的是全局真实鼠标位置，FocusMessage 只能让蓝点/箭头正确，人物仍可能按真实鼠标方向移动。
 # 这种游戏行为下，只有 FocusCursorPulse 这类会移动真实鼠标的方式能影响人物方向。
-DefaultMouseSendMethod=FocusMessage
+DefaultMouseSendMethod=PostMessage
 
 # 热键说明：
 # F11：绑定当前前台窗口为窗口1/带领者

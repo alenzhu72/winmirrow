@@ -24,6 +24,7 @@ internal static class NativeMethods
     internal const int HTBOTTOMRIGHT = 0x0011;
 
     internal const uint VK_E = 0x45;
+    internal const uint VK_CONTROL = 0x11;
     internal const uint VK_Q = 0x51;
     internal const uint VK_S = 0x53;
     internal const uint VK_P = 0x50;

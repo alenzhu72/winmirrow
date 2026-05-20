@@ -153,12 +153,12 @@ public partial class Form1 : Form
         FormBorderStyle = FormBorderStyle.None;
         ShowInTaskbar = false;
         StartPosition = FormStartPosition.Manual;
-        ClientSize = new Size(1280, 84);
-        MinimumSize = new Size(900, 72);
+        ClientSize = new Size(1280, 112);
+        MinimumSize = new Size(900, 104);
         BackColor = Color.Black;
         ForeColor = Color.White;
         Opacity = 0.74;
-        Font = new Font(Font.FontFamily, 8.5f, FontStyle.Regular);
+        Font = new Font(Font.FontFamily, 9f, FontStyle.Regular);
 
         var root = new TableLayoutPanel
         {
@@ -181,7 +181,7 @@ public partial class Form1 : Form
         };
         leftPanel.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         leftPanel.RowStyles.Add(new RowStyle(SizeType.AutoSize));
-        leftPanel.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+        leftPanel.RowStyles.Add(new RowStyle(SizeType.Absolute, 42));
 
         StyleCommandButton(_autoBindButton);
         StyleCommandButton(_swapButton);
@@ -219,7 +219,7 @@ public partial class Form1 : Form
         _hotkeyLabel.ForeColor = Color.White;
         _hotkeyLabel.AutoSize = false;
         _hotkeyLabel.Dock = DockStyle.Fill;
-        _hotkeyLabel.Height = 18;
+        _hotkeyLabel.MaximumSize = new Size(0, 40);
         leftPanel.Controls.Add(_hotkeyLabel, 0, 2);
         root.Controls.Add(leftPanel, 0, 0);
 
@@ -275,7 +275,7 @@ public partial class Form1 : Form
         button.BackColor = Color.Black;
         button.ForeColor = Color.White;
         button.Margin = new Padding(2, 0, 4, 2);
-        button.Padding = new Padding(4, 1, 4, 1);
+        button.Padding = new Padding(5, 3, 5, 3);
     }
 
     private static Control MakeRow(string name, Control value, int valueWidth)
@@ -299,7 +299,7 @@ public partial class Form1 : Form
         });
         value.AutoSize = false;
         value.Width = valueWidth;
-        value.Height = 18;
+        value.Height = 24;
         value.ForeColor = Color.White;
         value.BackColor = Color.Transparent;
         row.Controls.Add(value);
@@ -578,7 +578,7 @@ public partial class Form1 : Form
         var area = Screen.FromRectangle(gameBounds).WorkingArea;
 
         Width = area.Width;
-        Height = Math.Min(86, Math.Max(MinimumSize.Height, Math.Max(0, unionTop - area.Top)));
+        Height = Math.Min(128, Math.Max(MinimumSize.Height, Math.Max(0, unionTop - area.Top)));
         Location = new Point(area.Left, area.Top);
     }
 
@@ -748,7 +748,7 @@ public partial class Form1 : Form
             return;
         }
 
-        var sourceShiftDown = IsShiftDown();
+        var sourceShiftDown = IsSourceStandShiftDown();
 
         if (!NativeMethods.GetCursorPos(out var screenPoint))
         {
@@ -1090,9 +1090,11 @@ public partial class Form1 : Form
         UpdateLabels();
     }
 
-    private static bool IsShiftDown()
+    private static bool IsSourceStandShiftDown()
     {
-        return (NativeMethods.GetAsyncKeyState((int)NativeMethods.VK_SHIFT) & 0x8000) != 0;
+        var ctrlDown = (NativeMethods.GetAsyncKeyState((int)NativeMethods.VK_CONTROL) & 0x8000) != 0;
+        var shiftDown = (NativeMethods.GetAsyncKeyState((int)NativeMethods.VK_SHIFT) & 0x8000) != 0;
+        return shiftDown && !ctrlDown;
     }
 
     private static bool IsPointVisiblyOnWindow(IntPtr expectedWindow, NativeMethods.POINT screenPoint)
