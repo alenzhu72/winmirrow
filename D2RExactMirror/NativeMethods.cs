@@ -6,9 +6,12 @@ namespace D2RExactMirror;
 internal static class NativeMethods
 {
     internal const int WM_HOTKEY = 0x0312;
+    internal const int WM_NCLBUTTONDOWN = 0x00A1;
     internal const int WM_MOUSEMOVE = 0x0200;
     internal const int WM_KEYDOWN = 0x0100;
     internal const int WM_KEYUP = 0x0101;
+
+    internal const int HTCAPTION = 0x0002;
 
     internal const uint VK_E = 0x45;
     internal const uint VK_Q = 0x51;
@@ -141,6 +144,9 @@ internal static class NativeMethods
     internal static extern bool PostMessage(IntPtr hWnd, int msg, IntPtr wParam, IntPtr lParam);
 
     [DllImport("user32.dll", SetLastError = true)]
+    internal static extern IntPtr SendMessage(IntPtr hWnd, int msg, IntPtr wParam, IntPtr lParam);
+
+    [DllImport("user32.dll", SetLastError = true)]
     internal static extern IntPtr SendMessageTimeout(IntPtr hWnd, int msg, IntPtr wParam, IntPtr lParam, uint fuFlags, uint uTimeout, out IntPtr lpdwResult);
 
     [DllImport("user32.dll")]
@@ -163,6 +169,9 @@ internal static class NativeMethods
 
     [DllImport("user32.dll")]
     internal static extern short GetAsyncKeyState(int vKey);
+
+    [DllImport("user32.dll")]
+    internal static extern bool ReleaseCapture();
 
     [DllImport("user32.dll", SetLastError = true)]
     internal static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint lpdwProcessId);

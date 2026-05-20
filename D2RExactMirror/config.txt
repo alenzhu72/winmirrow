@@ -52,7 +52,7 @@ DefaultMouseSendMethod=FocusMessage
 # Ctrl+Shift+1：记录窗口1人物点
 # Ctrl+Shift+2：记录窗口2人物点
 # Ctrl+Shift+S：交换带领者和跟随者
-# Ctrl+Shift+P：窗口2原地/恢复跟随。原地时窗口2释放 E，不自动移动，适合放安全位置吃经验。
+# Ctrl+Shift+P：窗口2停止/恢复跟随。停止时窗口2释放 E，不自动移动，适合放安全位置吃经验。
 # Shift：窗口1站住时，同步让窗口2释放 E 并按住 Shift；松开 Shift 后窗口2恢复按住 E
 
 # 界面按钮说明：
@@ -61,6 +61,6 @@ DefaultMouseSendMethod=FocusMessage
 # 人物点:Manual/DynamicPlayCenter：切换手动人物点或按窗口尺寸自动估算人物点。
 # 鼠标:PostMessage/SendMessage/FocusMessage/FocusCursorPulse：切换鼠标发送方式。
 # 切换带领：窗口1和窗口2互换。
-# 窗口2:跟随/原地：切换窗口2是否自动按住 E 跟随。
+# 窗口2:跟随/停止：切换窗口2是否自动按住 E 跟随。
 # 启动/停止：开始或停止镜像。
 # 强制停止：停止镜像并释放窗口2的 E。

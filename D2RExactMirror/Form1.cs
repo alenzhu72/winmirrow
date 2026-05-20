@@ -20,6 +20,7 @@ public partial class Form1 : Form
     private readonly Label _stateLabel = new() { AutoSize = true };
     private readonly Label _coordLabel = new() { AutoSize = true };
     private readonly Label _anchorLabel = new() { AutoSize = true };
+    private readonly Label _hotkeyLabel = new() { AutoSize = true };
     private readonly Button _autoBindButton = new() { AutoSize = true, Text = "自动绑定D2R窗口" };
     private readonly Button _captureSourceAnchorButton = new() { AutoSize = true, Text = "记录窗口1人物点" };
     private readonly Button _captureTargetAnchorButton = new() { AutoSize = true, Text = "记录窗口2人物点" };
@@ -128,40 +129,52 @@ public partial class Form1 : Form
     {
         Text = "D2R Exact Mirror";
         TopMost = true;
+        FormBorderStyle = FormBorderStyle.None;
+        ShowInTaskbar = false;
         StartPosition = FormStartPosition.Manual;
-        ClientSize = new Size(1280, 74);
-        MinimumSize = new Size(900, 64);
-        Font = new Font(Font.FontFamily, 8.5f);
+        ClientSize = new Size(1280, 84);
+        MinimumSize = new Size(900, 72);
+        BackColor = Color.Black;
+        ForeColor = Color.White;
+        Opacity = 0.74;
+        Font = new Font(Font.FontFamily, 8.5f, FontStyle.Regular);
 
         var root = new TableLayoutPanel
         {
             Dock = DockStyle.Fill,
             ColumnCount = 2,
             RowCount = 1,
-            Padding = new Padding(6)
+            Padding = new Padding(8, 6, 8, 6),
+            BackColor = Color.Transparent
         };
-        root.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 58));
-        root.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 42));
+        root.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 48));
+        root.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 52));
         root.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
 
         var leftPanel = new TableLayoutPanel
         {
             Dock = DockStyle.Fill,
             ColumnCount = 1,
-            RowCount = 3
+            RowCount = 3,
+            BackColor = Color.Transparent
         };
         leftPanel.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         leftPanel.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         leftPanel.RowStyles.Add(new RowStyle(SizeType.AutoSize));
 
-        var buttons = new FlowLayoutPanel { AutoSize = true, Dock = DockStyle.Fill, WrapContents = false };
+        StyleCommandButton(_autoBindButton);
+        StyleCommandButton(_targetHoldButton);
+        StyleCommandButton(_toggleButton);
+        StyleCommandButton(_stopButton);
+
+        var buttons = new FlowLayoutPanel
+        {
+            AutoSize = true,
+            Dock = DockStyle.Fill,
+            WrapContents = false,
+            BackColor = Color.Transparent
+        };
         buttons.Controls.Add(_autoBindButton);
-        buttons.Controls.Add(_captureSourceAnchorButton);
-        buttons.Controls.Add(_captureTargetAnchorButton);
-        buttons.Controls.Add(_coordinateModeButton);
-        buttons.Controls.Add(_anchorModeButton);
-        buttons.Controls.Add(_sendMethodButton);
-        buttons.Controls.Add(_swapButton);
         buttons.Controls.Add(_targetHoldButton);
         buttons.Controls.Add(_toggleButton);
         buttons.Controls.Add(_stopButton);
@@ -172,18 +185,27 @@ public partial class Form1 : Form
             AutoSize = true,
             Dock = DockStyle.Fill,
             FlowDirection = FlowDirection.LeftToRight,
-            WrapContents = false
+            WrapContents = false,
+            BackColor = Color.Transparent
         };
-        windows.Controls.Add(MakeRow("窗1:", _window1Label, 390));
-        windows.Controls.Add(MakeRow("窗2:", _window2Label, 390));
+        windows.Controls.Add(MakeRow("窗1:", _window1Label, 330));
+        windows.Controls.Add(MakeRow("窗2:", _window2Label, 330));
         leftPanel.Controls.Add(windows, 0, 1);
+
+        _hotkeyLabel.Text = "快捷键: F11窗1  F12窗2  Ctrl+Shift+1/2人物点  Ctrl+Shift+E启动/停止  Ctrl+Shift+P窗口2跟随/停止  Ctrl+Shift+S切换  Shift站立  Ctrl+Shift+Z停止  Ctrl+Shift+Q退出";
+        _hotkeyLabel.ForeColor = Color.White;
+        _hotkeyLabel.AutoSize = false;
+        _hotkeyLabel.Dock = DockStyle.Fill;
+        _hotkeyLabel.Height = 18;
+        leftPanel.Controls.Add(_hotkeyLabel, 0, 2);
         root.Controls.Add(leftPanel, 0, 0);
 
         var rightStatus = new TableLayoutPanel
         {
             Dock = DockStyle.Fill,
             ColumnCount = 2,
-            RowCount = 3
+            RowCount = 3,
+            BackColor = Color.Transparent
         };
         rightStatus.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 54));
         rightStatus.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
@@ -197,6 +219,9 @@ public partial class Form1 : Form
 
         _log.Visible = false;
         Controls.Add(root);
+        ApplyTransparentText(this);
+        MouseDown += (_, e) => BeginDrag(e);
+        root.MouseDown += (_, e) => BeginDrag(e);
 
         _autoBindButton.Click += (_, _) => AutoBindDiabloWindows();
         _captureSourceAnchorButton.Click += (_, _) => CaptureAnchor(_window1, "窗口1", ref _sourceAnchor);
@@ -217,13 +242,27 @@ public partial class Form1 : Form
         PositionToolWindowBelowGames();
     }
 
+    private static void StyleCommandButton(Button button)
+    {
+        button.AutoSize = true;
+        button.FlatStyle = FlatStyle.Flat;
+        button.FlatAppearance.BorderColor = Color.FromArgb(210, Color.White);
+        button.FlatAppearance.MouseOverBackColor = Color.FromArgb(80, Color.White);
+        button.FlatAppearance.MouseDownBackColor = Color.FromArgb(120, Color.White);
+        button.BackColor = Color.Black;
+        button.ForeColor = Color.White;
+        button.Margin = new Padding(2, 0, 4, 2);
+        button.Padding = new Padding(4, 1, 4, 1);
+    }
+
     private static Control MakeRow(string name, Control value, int valueWidth)
     {
         var row = new FlowLayoutPanel
         {
             AutoSize = true,
             Dock = DockStyle.Fill,
-            WrapContents = false
+            WrapContents = false,
+            BackColor = Color.Transparent
         };
         row.Controls.Add(new Label
         {
@@ -231,11 +270,15 @@ public partial class Form1 : Form
             Width = 42,
             AutoSize = false,
             TextAlign = ContentAlignment.MiddleLeft,
-            Margin = new Padding(0, 3, 8, 3)
+            ForeColor = Color.White,
+            BackColor = Color.Transparent,
+            Margin = new Padding(0, 1, 4, 1)
         });
         value.AutoSize = false;
         value.Width = valueWidth;
-        value.Height = 20;
+        value.Height = 18;
+        value.ForeColor = Color.White;
+        value.BackColor = Color.Transparent;
         row.Controls.Add(value);
         return row;
     }
@@ -247,14 +290,38 @@ public partial class Form1 : Form
             Text = name,
             Dock = DockStyle.Fill,
             TextAlign = ContentAlignment.MiddleRight,
-            Margin = new Padding(0, 1, 4, 1)
+            ForeColor = Color.White,
+            BackColor = Color.Transparent,
+            Margin = new Padding(0, 0, 4, 0)
         }, 0, rowIndex);
 
         value.AutoSize = false;
         value.Dock = DockStyle.Fill;
         value.TextAlign = ContentAlignment.MiddleLeft;
-        value.Margin = new Padding(0, 1, 0, 1);
+        value.ForeColor = Color.White;
+        value.BackColor = Color.Transparent;
+        value.Margin = new Padding(0, 0, 0, 0);
         table.Controls.Add(value, 1, rowIndex);
+    }
+
+    private void BeginDrag(MouseEventArgs e)
+    {
+        if (e.Button != MouseButtons.Left) return;
+        NativeMethods.ReleaseCapture();
+        NativeMethods.SendMessage(Handle, NativeMethods.WM_NCLBUTTONDOWN, (IntPtr)NativeMethods.HTCAPTION, IntPtr.Zero);
+    }
+
+    private static void ApplyTransparentText(Control root)
+    {
+        foreach (Control control in root.Controls)
+        {
+            control.ForeColor = Color.White;
+            if (control is not Button)
+            {
+                control.BackColor = Color.Transparent;
+            }
+            ApplyTransparentText(control);
+        }
     }
 
     private void RegisterHotkeys()
@@ -276,7 +343,7 @@ public partial class Form1 : Form
         Log(okAnchor2 ? "Ctrl+Shift+2热键注册成功。" : "Ctrl+Shift+2热键注册失败，可用记录窗口2人物点按钮。");
         Log(okEmergency ? "Ctrl+Shift+Q强制结束热键注册成功。" : "Ctrl+Shift+Q强制结束热键注册失败。");
         Log(okSwap ? "Ctrl+Shift+S切换带领窗口热键注册成功。" : "Ctrl+Shift+S热键注册失败，可用切换带领按钮。");
-        Log(okHold ? "Ctrl+Shift+P窗口2原地/跟随热键注册成功。" : "Ctrl+Shift+P热键注册失败，可用原地按钮。");
+        Log(okHold ? "Ctrl+Shift+P窗口2停止/跟随热键注册成功。" : "Ctrl+Shift+P热键注册失败，可用窗口2按钮。");
     }
 
     private void UnregisterHotkeys()
@@ -433,7 +500,7 @@ public partial class Form1 : Form
         if (_targetHoldPaused)
         {
             ReleaseTargetInputs();
-            Log("窗口2已原地：释放 E，不再自动跟随。");
+            Log("窗口2已停止：释放 E，不再自动跟随。");
         }
         else
         {
@@ -488,7 +555,7 @@ public partial class Form1 : Form
         var area = Screen.FromRectangle(gameBounds).WorkingArea;
 
         Width = area.Width;
-        Height = Math.Min(78, Math.Max(MinimumSize.Height, Math.Max(0, unionTop - area.Top)));
+        Height = Math.Min(86, Math.Max(MinimumSize.Height, Math.Max(0, unionTop - area.Top)));
         Location = new Point(area.Left, area.Top);
     }
 
@@ -1032,13 +1099,13 @@ public partial class Form1 : Form
         _window2Label.Text = _window2 == IntPtr.Zero ? "未绑定" : $"跟随者/E目标  {FormatWindow(_window2)}";
         var eMode = _targetKeyDown ? "按下" : "松开";
         var shiftMode = _targetShiftDown ? "按下" : "松开";
-        var holdMode = _targetHoldPaused ? "原地" : "跟随";
+        var holdMode = _targetHoldPaused ? "停止" : "跟随";
         _stateLabel.Text = $"{(_running ? "运行" : "停止")}  窗口2={holdMode}  E={eMode}  Shift={shiftMode}  鼠标={_mouseSendMethod}";
         _anchorLabel.Text = $"坐标={_coordinateMode}  人物={_anchorMode}  窗1={FormatPoint(_sourceAnchor)}  窗2={FormatPoint(_targetAnchor)}";
         _coordinateModeButton.Text = $"坐标:{_coordinateMode}";
         _anchorModeButton.Text = $"人物点:{_anchorMode}";
         _sendMethodButton.Text = $"鼠标:{_mouseSendMethod}";
-        _targetHoldButton.Text = _targetHoldPaused ? "窗口2:原地" : "窗口2:跟随";
+        _targetHoldButton.Text = _targetHoldPaused ? "窗口2:停止" : "窗口2:跟随";
         _toggleButton.Text = _running ? "停止" : "启动";
     }
 
