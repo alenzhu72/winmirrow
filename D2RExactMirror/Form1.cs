@@ -153,8 +153,8 @@ public partial class Form1 : Form
         FormBorderStyle = FormBorderStyle.None;
         ShowInTaskbar = false;
         StartPosition = FormStartPosition.Manual;
-        ClientSize = new Size(1280, 112);
-        MinimumSize = new Size(900, 104);
+        ClientSize = new Size(1280, 136);
+        MinimumSize = new Size(900, 128);
         BackColor = Color.Black;
         ForeColor = Color.White;
         Opacity = 0.74;
@@ -181,7 +181,7 @@ public partial class Form1 : Form
         };
         leftPanel.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         leftPanel.RowStyles.Add(new RowStyle(SizeType.AutoSize));
-        leftPanel.RowStyles.Add(new RowStyle(SizeType.Absolute, 42));
+        leftPanel.RowStyles.Add(new RowStyle(SizeType.Absolute, 58));
 
         StyleCommandButton(_autoBindButton);
         StyleCommandButton(_swapButton);
@@ -219,7 +219,8 @@ public partial class Form1 : Form
         _hotkeyLabel.ForeColor = Color.White;
         _hotkeyLabel.AutoSize = false;
         _hotkeyLabel.Dock = DockStyle.Fill;
-        _hotkeyLabel.MaximumSize = new Size(0, 40);
+        _hotkeyLabel.MaximumSize = new Size(0, 56);
+        _hotkeyLabel.TextAlign = ContentAlignment.TopLeft;
         leftPanel.Controls.Add(_hotkeyLabel, 0, 2);
         root.Controls.Add(leftPanel, 0, 0);
 
@@ -578,7 +579,7 @@ public partial class Form1 : Form
         var area = Screen.FromRectangle(gameBounds).WorkingArea;
 
         Width = area.Width;
-        Height = Math.Min(128, Math.Max(MinimumSize.Height, Math.Max(0, unionTop - area.Top)));
+        Height = Math.Min(152, Math.Max(MinimumSize.Height, Math.Max(0, unionTop - area.Top)));
         Location = new Point(area.Left, area.Top);
     }
 
